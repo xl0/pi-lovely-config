@@ -4,7 +4,13 @@
 
 ## Runtime library
 
-`src/index.ts` exports:
+Core files:
+
+- `src/config.ts` contains scoped config spec/state/schema/path/file logic.
+- `src/ui.ts` contains `ScopedConfigEditor` and TUI-only helpers.
+- `src/index.ts` re-exports both modules.
+
+Public API:
 
 - `defineScopedConfigSpec()` to declare fields, defaults, schema, paths, load/write/delete, and user/workspace merge semantics.
 - `createScopedConfigSchema()` for TypeBox schemas from fields.
