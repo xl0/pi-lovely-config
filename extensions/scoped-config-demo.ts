@@ -183,8 +183,7 @@ async function openDemoEditor<Config extends object>(
 		return
 	}
 
-	await ctx.ui.custom<void>((tui, theme, ...args) => {
-		const done = args[1]
+	await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
 		return new ScopedConfigEditor({
 			tui,
 			theme,
