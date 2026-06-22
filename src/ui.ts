@@ -407,7 +407,6 @@ export class ScopedConfigEditor<Config extends object> {
 		const value = initial ?? getConfigValue(this.scoped[this.currentScope()], field.key)
 		const input = new Input()
 		input.setValue(typeof value === "string" || typeof value === "number" ? String(value) : "")
-		setInputCursor(input, 0)
 		input.focused = true
 		this.activeInput = input
 		this.activeInputDirty = false
@@ -544,10 +543,6 @@ function renderInput(input: Input, width: number, trimPadding = true): string {
 
 function inputCursor(input: Input): number {
 	return (input as unknown as { cursor: number }).cursor
-}
-
-function setInputCursor(input: Input, cursor: number): void {
-	;(input as unknown as { cursor: number }).cursor = cursor
 }
 
 function renderStringInput(input: Input, width: number): string {
