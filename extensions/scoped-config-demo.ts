@@ -177,6 +177,8 @@ async function openDemoEditor<Config extends object>(
 	state: ScopedConfigState<Config>
 ): Promise<void> {
 	const scoped = state.loadScoped(ctx.cwd)
+	const warnings = spec.getScopedWarnings(scoped, ctx.cwd)
+	if (warnings.length > 0) ctx.ui.notify(warnings.map(warning => `${warning.path}: ${warning.message}`).join("\n"), "warning")
 
 	if (ctx.mode !== "tui") {
 		ctx.ui.notify(formatEffectiveConfig(state), "info")

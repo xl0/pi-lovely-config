@@ -9,6 +9,8 @@ export type ConfigPatch<Config extends object> = Partial<Config> & Record<string
 export type ScopedConfigPatch<Config extends object> = Record<ConfigScope, ConfigPatch<Config>>
 export type ResolvedConfig<Config extends object> = { [Key in keyof Config]-?: NonNullable<Config[Key]> } & Record<string, unknown>
 export type ConfigScopes = readonly [ConfigScope] | readonly ["user", "workspace"]
+export type ConfigWarning = { key: string; message: string }
+export type ScopedConfigWarning = ConfigWarning & { scope: ConfigScope; path: string }
 
 type EnumValues = readonly [string, ...string[]]
 type NumberValues = readonly [number, ...number[]]
@@ -118,6 +120,8 @@ export type ScopedConfigSpec<Config extends object> = {
 	readFileOrEmpty(path: string): ConfigPatch<Config>
 	saveFile(path: string, config: ConfigPatch<Config>): void
 	deleteFile(path: string): void
+	getWarnings(config: ConfigPatch<Config> | ResolvedConfig<Config>): ConfigWarning[]
+	getScopedWarnings(scoped: ScopedConfigPatch<Config>, cwd: string): ScopedConfigWarning[]
 	resolve(scoped: ScopedConfigPatch<Config>): ResolvedConfig<Config>
 	loadScoped(cwd: string): ScopedConfigPatch<Config>
 	load(cwd: string): ResolvedConfig<Config>
@@ -229,11 +233,24 @@ export function defineScopedConfigSpec<const Fields extends readonly ScopedConfi
 		rmSync(path, { force: true })
 	}
 
+	function getWarnings(config: ConfigPatch<Config> | ResolvedConfig<Config>): ConfigWarning[] {
+		return getConfigWarnings(options.fields, config)
+	}
+
+	function getScopedWarnings(scoped: ScopedConfigPatch<Config>, cwd: string): ScopedConfigWarning[] {
+		const warnings: ScopedConfigWarning[] = []
+		for (const scope of scopes) {
+			const path = getPath(scope, cwd)
+			for (const warning of getWarnings(scoped[scope])) warnings.push({ ...warning, scope, path })
+		}
+		return warnings
+	}
+
 	function resolveScoped(scoped: ScopedConfigPatch<Config>): ResolvedConfig<Config> {
 		let resolved = { ...defaults }
 		for (const scope of scopes) {
 			try {
-				resolved = { ...resolved, ...parseConfigPatch(scoped[scope]) }
+				resolved = { ...resolved, ...createResolvingPatch(parseConfigPatch(scoped[scope])) }
 			} catch (error) {
 				const message = formatConfigParseError(error)
 				throw new Error(`Invalid ${scope} config patch: ${message}`)
@@ -267,6 +284,15 @@ export function defineScopedConfigSpec<const Fields extends readonly ScopedConfi
 		return config as ConfigPatch<Config>
 	}
 
+	function createResolvingPatch(config: ConfigPatch<Config>): ConfigPatch<Config> {
+		const resolving = { ...(config as Record<string, unknown>) }
+		for (const field of options.fields) {
+			const fieldValue = resolving[field.key]
+			if (fieldValue !== undefined && getConfigValueWarning(field, fieldValue)) delete resolving[field.key]
+		}
+		return resolving as ConfigPatch<Config>
+	}
+
 	return {
 		fileName: options.fileName,
 		scopes,
@@ -278,6 +304,8 @@ export function defineScopedConfigSpec<const Fields extends readonly ScopedConfi
 		readFileOrEmpty,
 		saveFile,
 		deleteFile,
+		getWarnings,
+		getScopedWarnings,
 		resolve: resolveScoped,
 		loadScoped,
 		load
@@ -390,12 +418,33 @@ function validateConfigValue(field: ScopedConfigField, value: unknown): void {
 			return
 		case "number":
 			if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`/${field.key} must be number`)
-			if (field.values !== undefined && !field.values.includes(value)) {
-				throw new Error(`/${field.key} must be one of: ${field.values.join(", ")}`)
-			}
-			if (field.min !== undefined && value < field.min) throw new Error(`/${field.key} must be at least ${field.min}`)
-			if (field.max !== undefined && value > field.max) throw new Error(`/${field.key} must be at most ${field.max}`)
+			return
 	}
+}
+
+export function getConfigWarnings(fields: readonly ScopedConfigField[], config: object): ConfigWarning[] {
+	const warnings: ConfigWarning[] = []
+	for (const field of fields) {
+		const value = getConfigValue(config, field.key)
+		if (value === undefined) continue
+		const message = getConfigValueWarning(field, value)
+		if (message) warnings.push({ key: field.key, message })
+	}
+	return warnings
+}
+
+function getConfigValueWarning(field: ScopedConfigField, value: unknown): string | undefined {
+	if (field.kind !== "number" || typeof value !== "number" || !Number.isFinite(value)) return undefined
+	if (field.values !== undefined && !field.values.includes(value)) {
+		return `/${field.key} should be one of: ${field.values.join(", ")}; value is ignored while resolving`
+	}
+	if (field.min !== undefined && value < field.min) {
+		return `/${field.key} should be at least ${field.min}; value is ignored while resolving`
+	}
+	if (field.max !== undefined && value > field.max) {
+		return `/${field.key} should be at most ${field.max}; value is ignored while resolving`
+	}
+	return undefined
 }
 
 function defaultConfig(fields: readonly ScopedConfigField[]): Record<string, unknown> {
