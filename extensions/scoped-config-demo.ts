@@ -36,6 +36,13 @@ const demoFields = [
 		default: false
 	},
 	{
+		key: "signature",
+		label: "Signature",
+		description: "String field. Use the include toggle to unset the value",
+		kind: "string",
+		default: "sent from pi"
+	},
+	{
 		key: "detailLevel",
 		label: "Detail level",
 		description: "Conditional enum field. Visible only while Compact mode is not on",
@@ -174,6 +181,7 @@ function formatEffectiveConfig<Config extends object>(state: ScopedConfigState<C
 	return [
 		`theme=${state.get("theme" as keyof Config)}`,
 		`compact=${state.get("compactMode" as keyof Config) === true ? "on" : "off"}`,
+		`signature=${JSON.stringify(state.get("signature" as keyof Config))}`,
 		`detail=${state.get("detailLevel" as keyof Config)}`,
 		`experimental=${state.get("experimental" as keyof Config) === true ? "on" : "off"}`,
 		`experiment=${state.get("experimentMode" as keyof Config)}`

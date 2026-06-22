@@ -28,7 +28,7 @@ Specs can restrict active scopes with `scopes: ["user"]` or `scopes: ["workspace
 Merge order follows the configured `scopes`. Missing files read as empty config.
 Invalid JSON/schema throws with path.
 
-Supported fields: enum and boolean. Fields can include `description` and `valueDescriptions`, be indented with `depth`, and hidden with `visibleWhen`.
+Supported fields: enum, boolean, and string. Fields can include `description` and `valueDescriptions`, be indented with `depth`, and hidden with `visibleWhen`.
 
 ## Manual extension
 
