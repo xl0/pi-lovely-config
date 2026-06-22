@@ -32,6 +32,7 @@ export class ScopedConfigEditor<Config extends object> {
 	private readonly done: (result: undefined) => void
 	private activeInput: Input | undefined
 	private activeInputDirty = false
+	private activeInputError: string | undefined
 	private focusPart: FocusPart = "value"
 	private currentTab = 0
 	private currentRow = 0
@@ -254,9 +255,11 @@ export class ScopedConfigEditor<Config extends object> {
 
 	private renderActiveValueDescription(lines: string[], width: number, scope: ConfigScope, fields: readonly ScopedConfigField[]): void {
 		const field = this.selectedField(fields)
+		const error = this.activeInput ? this.activeInputError : undefined
 		const valueDescription = field ? getValueDescription(this.scoped[scope], field) : undefined
 		lines.push("")
-		if (valueDescription) addWrappedWithPrefix(lines, width, " ", this.theme.fg("muted", valueDescription))
+		if (error) addWrappedWithPrefix(lines, width, " ", this.theme.fg("error", error))
+		else if (valueDescription) addWrappedWithPrefix(lines, width, " ", this.theme.fg("muted", valueDescription))
 		else lines.push("")
 	}
 
@@ -376,6 +379,7 @@ export class ScopedConfigEditor<Config extends object> {
 		if (this.focusPart !== "value" || !field || !fieldUsesInput(field)) {
 			this.activeInput = undefined
 			this.activeInputDirty = false
+			this.activeInputError = undefined
 			return
 		}
 
@@ -383,6 +387,7 @@ export class ScopedConfigEditor<Config extends object> {
 		if ((field.kind === "string" && typeof value !== "string") || (field.kind === "number" && typeof value !== "number")) {
 			this.activeInput = undefined
 			this.activeInputDirty = false
+			this.activeInputError = undefined
 			return
 		}
 
@@ -410,6 +415,7 @@ export class ScopedConfigEditor<Config extends object> {
 		input.focused = true
 		this.activeInput = input
 		this.activeInputDirty = false
+		this.updateActiveInputError(field)
 		this.tui.requestRender()
 	}
 
@@ -423,19 +429,21 @@ export class ScopedConfigEditor<Config extends object> {
 		}
 
 		if (this.activeInput) {
-			if (field.kind === "number" && !isNumberInput(data, this.activeInput) && !isNumberInputControl(data, kb)) return true
+			if (field.kind === "number" && !isNumberInputAllowed(data, this.activeInput, kb)) return true
 			this.activeInput.handleInput(data)
 			this.activeInputDirty = true
+			this.updateActiveInputError(field)
 			this.tui.requestRender()
 			return true
 		}
 
 		if (data.length === 1 && !matchesKey(data, Key.escape)) {
-			if (field.kind === "number" && !isNumberInput(data)) return true
+			if (field.kind === "number" && !isNumberInputAllowed(data, undefined, kb)) return true
 			this.startInput(field)
 			const input = this.activeInput as Input | undefined
 			if (input) input.handleInput(data)
 			this.activeInputDirty = true
+			this.updateActiveInputError(field)
 			this.tui.requestRender()
 			return true
 		}
@@ -450,17 +458,20 @@ export class ScopedConfigEditor<Config extends object> {
 		if (field.kind === "number") {
 			const parsed = parseNumberInput(field, value)
 			if (!parsed.ok) {
-				this.ctx.ui.notify(parsed.message, "error")
+				this.activeInputError = parsed.message
+				this.tui.requestRender()
 				return false
 			}
 			this.activeInput = undefined
 			this.activeInputDirty = false
+			this.activeInputError = undefined
 			this.save(this.currentScope(), setConfigValue(this.scoped[this.currentScope()], field.key, parsed.value))
 			return true
 		}
 
 		this.activeInput = undefined
 		this.activeInputDirty = false
+		this.activeInputError = undefined
 		this.save(this.currentScope(), setConfigValue(this.scoped[this.currentScope()], field.key, value))
 		return true
 	}
@@ -471,7 +482,8 @@ export class ScopedConfigEditor<Config extends object> {
 
 		const parsed = parseNumberInput(field, this.activeInput.getValue(), { validateRange: false })
 		if (!parsed.ok) {
-			this.ctx.ui.notify(parsed.message, "error")
+			this.activeInputError = parsed.message
+			this.tui.requestRender()
 			return
 		}
 
@@ -484,10 +496,22 @@ export class ScopedConfigEditor<Config extends object> {
 					: parsed.value
 		this.activeInput = undefined
 		this.activeInputDirty = false
+		this.activeInputError = undefined
 		this.save(this.currentScope(), setConfigValue(this.scoped[this.currentScope()], field.key, nextNumberValue(field, base)))
 	}
 
+	private updateActiveInputError(field: ScopedConfigField): void {
+		if (field.kind !== "number" || field.values || !this.activeInput) {
+			this.activeInputError = undefined
+			return
+		}
+
+		const parsed = parseNumberInput(field, this.activeInput.getValue())
+		this.activeInputError = parsed.ok ? undefined : parsed.message
+	}
+
 	private save(scope: ConfigScope, nextConfig: ConfigPatch<Config>): void {
+		this.activeInputError = undefined
 		this.scoped = { ...this.scoped, [scope]: nextConfig }
 		this.spec.saveFile(this.spec.getPath(scope, this.ctx.cwd), nextConfig)
 		this.onChange(this.spec.resolve(this.scoped), this.scoped)
@@ -554,18 +578,15 @@ function renderStringInput(input: Input, width: number): string {
 	return truncateToWidth(`${beforeCursor}${CURSOR_MARKER}\x1b[7m${atCursor}\x1b[27m${afterCursor}`, width, "")
 }
 
-function isNumberInput(data: string, input?: Input): boolean {
+function isNumberInputAllowed(data: string, input: Input | undefined, kb: Keybindings): boolean {
+	if (kb.matches(data, "tui.editor.deleteCharBackward") || kb.matches(data, "tui.editor.deleteCharForward")) return true
 	if (/^[0-9]$/.test(data)) return true
-	if (data === "-") {
+	if (data === ".") return !input?.getValue().includes(".")
+	if (data === "+" || data === "-") {
 		if (!input) return true
-		return inputCursor(input) === 0 && !input.getValue().includes("-")
+		return inputCursor(input) === 0 && !/[+-]/.test(input.getValue())
 	}
-	if (data !== ".") return false
-	return !input?.getValue().includes(".")
-}
-
-function isNumberInputControl(data: string, kb: Keybindings): boolean {
-	return kb.matches(data, "tui.editor.deleteCharBackward") || kb.matches(data, "tui.editor.deleteCharForward")
+	return data.length !== 1
 }
 
 function parseNumberInput(
