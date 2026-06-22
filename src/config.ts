@@ -6,6 +6,7 @@ import Schema from "typebox/schema"
 
 export type ConfigScope = "user" | "workspace"
 export type ScopedConfig<Config extends object> = Record<ConfigScope, Config>
+export type ConfigScopes = readonly [ConfigScope, ...ConfigScope[]]
 
 type EnumValues = readonly [string, ...string[]]
 
@@ -59,6 +60,7 @@ type ValidateEnumDefaults<Fields extends readonly ScopedConfigField[]> = {
 
 export type ScopedConfigSpec<Config extends object> = {
 	fileName: string
+	scopes: ConfigScopes
 	fields: readonly ScopedConfigField[]
 	schema: TSchema
 	defaults: ConfigDefaults<Config>
@@ -108,6 +110,7 @@ export function createScopedConfigSchema(fields: readonly ScopedConfigField[]): 
 
 export function defineScopedConfigSpec<const Fields extends readonly ScopedConfigField[]>(options: {
 	fileName: string
+	scopes?: ConfigScopes
 	fields: Fields & ValidateEnumDefaults<Fields>
 }): ScopedConfigSpec<ConfigFromFields<Fields>> & {
 	fields: Fields
@@ -117,6 +120,8 @@ export function defineScopedConfigSpec<const Fields extends readonly ScopedConfi
 	const schema = createScopedConfigSchema(options.fields)
 	const defaults = defaultConfig(options.fields) as ConfigDefaults<Config>
 	const validator = Schema.Compile(schema)
+	const scopes = options.scopes ?? (["user", "workspace"] as const)
+	validateScopes(scopes)
 
 	function get<Key extends keyof Config>(config: Config, key: Key): NonNullable<Config[Key]> {
 		const value = getConfigValue(config, String(key))
@@ -148,14 +153,15 @@ export function defineScopedConfigSpec<const Fields extends readonly ScopedConfi
 	}
 
 	function merge(scoped: ScopedConfig<Config>): Config {
-		return { ...scoped.user, ...scoped.workspace }
+		let merged = {} as Config
+		for (const scope of scopes) merged = { ...merged, ...scoped[scope] }
+		return merged
 	}
 
 	function loadScoped(cwd: string): ScopedConfig<Config> {
-		return {
-			user: readFileOrEmpty(getPath("user", cwd)),
-			workspace: readFileOrEmpty(getPath("workspace", cwd))
-		}
+		const scoped = { user: {} as Config, workspace: {} as Config }
+		for (const scope of scopes) scoped[scope] = readFileOrEmpty(getPath(scope, cwd))
+		return scoped
 	}
 
 	function load(cwd: string): Config {
@@ -164,6 +170,7 @@ export function defineScopedConfigSpec<const Fields extends readonly ScopedConfi
 
 	return {
 		fileName: options.fileName,
+		scopes,
 		fields: options.fields,
 		schema,
 		defaults,
@@ -175,6 +182,14 @@ export function defineScopedConfigSpec<const Fields extends readonly ScopedConfi
 		merge,
 		loadScoped,
 		load
+	}
+}
+
+function validateScopes(scopes: ConfigScopes): void {
+	const seen = new Set<ConfigScope>()
+	for (const scope of scopes) {
+		if (seen.has(scope)) throw new Error(`Duplicate config scope: ${scope}`)
+		seen.add(scope)
 	}
 }
 

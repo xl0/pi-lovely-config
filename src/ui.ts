@@ -8,8 +8,6 @@ type RenderTui = { requestRender(): void }
 
 type ScopedConfigChangeHandler<Config extends object> = (effective: Config, scoped: ScopedConfig<Config>) => void
 
-const scopeTabs = ["user", "workspace"] as const satisfies readonly ConfigScope[]
-
 export class ScopedConfigEditor<Config extends object> {
 	private scoped: ScopedConfig<Config>
 	private readonly tui: RenderTui
@@ -19,6 +17,7 @@ export class ScopedConfigEditor<Config extends object> {
 	private readonly onChange: ScopedConfigChangeHandler<Config>
 	private readonly fields: readonly ScopedConfigField[]
 	private readonly defaults: ConfigDefaults<Config>
+	private readonly scopes: readonly ConfigScope[]
 	private readonly done: (result: undefined) => void
 	private currentTab = 0
 	private currentRow = 0
@@ -39,6 +38,7 @@ export class ScopedConfigEditor<Config extends object> {
 		this.onChange = options.onChange
 		this.fields = options.spec.fields
 		this.defaults = options.spec.defaults
+		this.scopes = options.spec.scopes
 		this.scoped = options.scoped
 		this.done = options.done
 	}
@@ -95,7 +95,7 @@ export class ScopedConfigEditor<Config extends object> {
 
 	private renderTabs(lines: string[], width: number): void {
 		const tabs = ["← "]
-		for (const [index, scope] of scopeTabs.entries()) {
+		for (const [index, scope] of this.scopes.entries()) {
 			const isUnset = this.scopeIsUnset(scope)
 			const text = ` ${isUnset ? "□" : "■"} ${scopeLabel(scope)} `
 			const styled =
@@ -109,7 +109,7 @@ export class ScopedConfigEditor<Config extends object> {
 	}
 
 	private renderScopeHeader(lines: string[], width: number): void {
-		const scope = scopeTabs[this.currentTab]
+		const scope = this.scopes[this.currentTab]
 		if (!scope) return
 
 		const path = this.spec.getPath(scope, this.ctx.cwd)
@@ -131,7 +131,7 @@ export class ScopedConfigEditor<Config extends object> {
 
 			const prefix = this.theme.fg(selected ? "accent" : "muted", `${selected ? "> " : "  "}${"  ".repeat(row.field.depth ?? 0)}`)
 			const value = formatScopedValue(this.scoped[scope], row.field)
-			const note = getScopeNote(scope, this.scoped, row.field)
+			const note = getScopeNote(scope, this.scopes, this.scoped, row.field)
 			const renderedNote = note ? ` ${this.theme.fg("muted", `(${note})`)}` : ""
 			const valueStyle = value === "unset" ? "muted" : "accent"
 			addWrappedWithPrefix(
@@ -155,11 +155,16 @@ export class ScopedConfigEditor<Config extends object> {
 	}
 
 	private currentScope(): ConfigScope {
-		return scopeTabs[this.currentTab] ?? "user"
+		return this.scopes[this.currentTab] ?? "user"
 	}
 
 	private resolvedConfig(scope: ConfigScope): Record<string, unknown> {
-		return { ...this.defaults, ...this.scoped.user, ...(scope === "workspace" ? this.scoped.workspace : {}) }
+		let config: Record<string, unknown> = { ...this.defaults }
+		for (const configScope of this.scopes) {
+			config = { ...config, ...this.scoped[configScope] }
+			if (configScope === scope) break
+		}
+		return config
 	}
 
 	private rows(scope: ConfigScope = this.currentScope()): Row[] {
@@ -178,7 +183,7 @@ export class ScopedConfigEditor<Config extends object> {
 	}
 
 	private switchTab(delta: number): void {
-		this.currentTab = (this.currentTab + delta + scopeTabs.length) % scopeTabs.length
+		this.currentTab = (this.currentTab + delta + this.scopes.length) % this.scopes.length
 		this.refresh()
 	}
 
@@ -270,6 +275,7 @@ function formatFieldValue(field: ScopedConfigField, value: unknown): string {
 
 function getScopeNote<Config extends object>(
 	scope: ConfigScope,
+	scopes: readonly ConfigScope[],
 	configs: ScopedConfig<Config>,
 	field: ScopedConfigField
 ): string | undefined {
@@ -278,6 +284,10 @@ function getScopeNote<Config extends object>(
 	const user = userValue === undefined ? undefined : formatFieldValue(field, userValue)
 	const workspace = workspaceValue === undefined ? undefined : formatFieldValue(field, workspaceValue)
 	const defaultValue = formatFieldValue(field, field.default)
+	if (scopes.length === 1) {
+		const value = scope === "user" ? user : workspace
+		return value === undefined ? `uses default: ${defaultValue}` : `overrides default: ${defaultValue}`
+	}
 
 	if (user === undefined && workspace === undefined) return `uses default: ${defaultValue}`
 
