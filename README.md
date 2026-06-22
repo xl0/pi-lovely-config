@@ -19,7 +19,9 @@ Exports:
 - `ConfigScopes`
 - `ConfigScope`
 - `ConfigScopeMode`
-- `ScopedConfig`
+- `ConfigPatch`
+- `ScopedConfigPatch`
+- `ResolvedConfig`
 - `ScopedConfigField`
 - `ScopedConfigSpec`
 - `ConfigFromFields`
@@ -29,8 +31,10 @@ Config files use fixed Pi scopes by default:
 - User: `~/.pi/agent/<fileName>`
 - Workspace: `<cwd>/.pi/<fileName>`
 
-Workspace values override User values. Missing files read as empty config.
-Invalid JSON/schema throws a diagnostic error with the file path.
+Workspace values override User values. Missing files read as empty config patches.
+`loadScoped()` returns per-scope patches. `resolve()` and `load()` return resolved
+config with defaults filled. Invalid JSON/schema throws a diagnostic error with
+the file path. Unknown config-file properties are ignored.
 
 Use `scope` to restrict a spec to one scope:
 
@@ -44,6 +48,7 @@ defineScopedConfigSpec({
 
 Default is `scope: "both"`. Workspace always overrides User. `scope` accepts
 `"user"`, `"workspace"`, or `"both"`; callers cannot configure scope order.
+`fileName` must be a plain file name, not a path.
 
 Fields support optional `description` and `valueDescriptions`; `ScopedConfigEditor`
 renders the active field and set value descriptions under the field list.

@@ -14,7 +14,7 @@ Public API:
 
 - `defineScopedConfigSpec()` to declare fields, defaults, schema, paths, load/write/delete, and user/workspace merge semantics.
 - `createScopedConfigSchema()` for TypeBox schemas from fields.
-- `ScopedConfigState` for in-memory effective config access.
+- `ScopedConfigState` for in-memory resolved config access.
 - `ScopedConfigEditor` custom TUI component for editing user/workspace scopes.
 - Types for scopes, specs, fields, and field-derived config.
 
@@ -25,8 +25,11 @@ Scopes are fixed:
 
 Specs default to `scope: "both"`, where workspace always overrides user.
 Specs can restrict active scopes with `scope: "user"` or `scope: "workspace"`.
-Callers cannot configure scope order. Missing files read as empty config.
-Invalid JSON/schema throws with path and validation details.
+Callers cannot configure scope order. Missing files read as empty config patches.
+`loadScoped()` returns user/workspace patches; `resolve()` and `load()` return defaults-filled resolved config.
+Invalid JSON/config values throw with path and validation details. Unknown file properties are ignored.
+Validation is implemented locally; TypeBox is used for public schema generation only.
+Config file names must be plain file names, not paths. `saveFile()` validates known fields and deletes empty patches.
 
 Supported fields: enum, boolean, string, and number. Fields can include `description` and `valueDescriptions`, be indented with `depth`, and hidden with `visibleWhen`.
 Number fields support either `min`/`max`/`step` or explicit `values`, not both.
@@ -44,3 +47,4 @@ It opens `ScopedConfigEditor` in TUI mode, showing enum, boolean, nested, and co
 
 - `bun run typecheck` typechecks `src` and `extensions`.
 - `bun run biome:check` checks formatting/linting.
+- Pi packages (`@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, `typebox`) are peers at runtime and local dev deps for typechecking.
