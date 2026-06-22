@@ -23,12 +23,15 @@ Scopes are fixed:
 - user: `~/.pi/agent/<fileName>`
 - workspace: `<cwd>/.pi/<fileName>`
 
-Specs default to `scopes: ["user", "workspace"]`, where workspace overrides user.
-Specs can restrict active scopes with `scopes: ["user"]` or `scopes: ["workspace"]`.
-Merge order follows the configured `scopes`. Missing files read as empty config.
-Invalid JSON/schema throws with path.
+Specs default to `scope: "both"`, where workspace always overrides user.
+Specs can restrict active scopes with `scope: "user"` or `scope: "workspace"`.
+Callers cannot configure scope order. Missing files read as empty config.
+Invalid JSON/schema throws with path and validation details.
 
-Supported fields: enum, boolean, string, and number. Fields can include `description` and `valueDescriptions`, be indented with `depth`, and hidden with `visibleWhen`. Number fields support `min`, `max`, `step`, or explicit `values`.
+Supported fields: enum, boolean, string, and number. Fields can include `description` and `valueDescriptions`, be indented with `depth`, and hidden with `visibleWhen`.
+Number fields support either `min`/`max`/`step` or explicit `values`, not both.
+Inline input Esc closes the editor when the input matches persisted state;
+otherwise it reverts the input to persisted state.
 
 ## Manual extension
 

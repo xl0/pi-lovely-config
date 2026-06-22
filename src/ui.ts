@@ -74,7 +74,7 @@ export class ScopedConfigEditor<Config extends object> {
 			lines,
 			renderWidth,
 			" ",
-			this.theme.fg("dim", "Tab switch scope • ↑↓ select • ←→ include/value • Enter/Space edit/toggle • Esc close")
+			this.theme.fg("dim", "Tab switch scope • ↑↓ select • ←→ include/value • Enter/Space edit/toggle • Esc reset/close")
 		)
 		lines.push(this.theme.fg("accent", "─".repeat(renderWidth)))
 
@@ -91,6 +91,10 @@ export class ScopedConfigEditor<Config extends object> {
 			return
 		}
 		if (this.activeInput && kb.matches(data, "tui.select.cancel")) {
+			if (this.activeInputMatchesPersisted()) {
+				this.done(undefined)
+				return
+			}
 			this.updateActiveInput()
 			this.tui.requestRender()
 			return
@@ -163,15 +167,16 @@ export class ScopedConfigEditor<Config extends object> {
 		}
 		if (kb.matches(data, "tui.input.submit") && this.focusPart === "value" && this.activeInput) {
 			if (this.selectedField()?.kind === "number" && this.activeInputDirty) this.commitActiveInput()
-			else if (this.selectedField()?.kind === "number") this.activateRow("submit")
+			else if (this.selectedField()?.kind === "number") this.activateRow()
+			else this.commitActiveInput()
 			return
 		}
 		if (kb.matches(data, "tui.input.submit")) {
-			this.activateRow("submit")
+			this.activateRow()
 			return
 		}
 		if (isSpace) {
-			this.activateRow("space")
+			this.activateRow()
 			return
 		}
 		if (this.handleActiveInput(data)) return
@@ -321,7 +326,7 @@ export class ScopedConfigEditor<Config extends object> {
 		this.refresh()
 	}
 
-	private activateRow(_action: "submit" | "space"): void {
+	private activateRow(): void {
 		const scope = this.currentScope()
 		const fields = this.visibleFields(scope)
 		const field = this.selectedField(fields)
@@ -364,6 +369,21 @@ export class ScopedConfigEditor<Config extends object> {
 		}
 
 		this.startInput(field, String(value))
+	}
+
+	private activeInputMatchesPersisted(): boolean {
+		const field = this.selectedField()
+		if (!field || !fieldUsesInput(field) || !this.activeInput) return true
+
+		const persisted = getConfigValue(this.scoped[this.currentScope()], field.key)
+		const inputValue = this.activeInput.getValue()
+		if (field.kind === "string") return typeof persisted === "string" && inputValue === persisted
+		if (field.kind !== "number" || typeof persisted !== "number") return false
+
+		const trimmed = inputValue.trim()
+		if (trimmed === "" || trimmed === "-" || trimmed === "." || trimmed === "-.") return false
+		const parsed = Number(trimmed)
+		return Number.isFinite(parsed) && parsed === persisted
 	}
 
 	private startInput(field: ScopedConfigField, initial?: string): void {
@@ -570,7 +590,7 @@ function nextNumberValue(field: Extract<ScopedConfigField, { kind: "number" }>, 
 	const step = field.step ?? 1
 	const current = typeof value === "number" ? value : field.default
 	const next = roundToStepPrecision(current + step, step)
-	if (field.max !== undefined && next > field.max) return field.min ?? field.default
+	if (field.max !== undefined && next > field.max) return current < field.max ? field.max : (field.min ?? field.default)
 	return next
 }
 

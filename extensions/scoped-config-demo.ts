@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent"
 import {
-	type ConfigScopes,
+	type ConfigScopeMode,
 	defineScopedConfigSpec,
 	ScopedConfigEditor,
 	type ScopedConfigField,
@@ -109,9 +109,9 @@ const demoFields = [
 ] as const satisfies readonly ScopedConfigField[]
 
 const scopeDemoConfigs = {
-	user: defineScopeDemoConfig("user", ["user"]),
-	workspace: defineScopeDemoConfig("workspace", ["workspace"]),
-	both: defineScopeDemoConfig("both", ["user", "workspace"])
+	user: defineScopeDemoConfig("user", "user"),
+	workspace: defineScopeDemoConfig("workspace", "workspace"),
+	both: defineScopeDemoConfig("both", "both")
 }
 
 const scopeDemoStates = {
@@ -120,10 +120,10 @@ const scopeDemoStates = {
 	both: new ScopedConfigState(scopeDemoConfigs.both)
 }
 
-function defineScopeDemoConfig(mode: ScopeDemoMode, scopes: ConfigScopes) {
+function defineScopeDemoConfig(mode: ScopeDemoMode, scope: ConfigScopeMode) {
 	return defineScopedConfigSpec({
 		fileName: `scoped-config-${mode}-demo.json`,
-		scopes,
+		scope,
 		fields: [
 			...demoFields,
 			{
@@ -183,7 +183,8 @@ async function openDemoEditor<Config extends object>(
 		return
 	}
 
-	await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
+	await ctx.ui.custom<void>((tui, theme, ...args) => {
+		const done = args[1]
 		return new ScopedConfigEditor({
 			tui,
 			theme,

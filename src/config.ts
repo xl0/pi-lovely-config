@@ -5,8 +5,9 @@ import { type TObject, type TSchema, Type } from "typebox"
 import Schema from "typebox/schema"
 
 export type ConfigScope = "user" | "workspace"
+export type ConfigScopeMode = ConfigScope | "both"
 export type ScopedConfig<Config extends object> = Record<ConfigScope, Config>
-export type ConfigScopes = readonly [ConfigScope, ...ConfigScope[]]
+export type ConfigScopes = readonly [ConfigScope] | readonly ["user", "workspace"]
 
 type EnumValues = readonly [string, ...string[]]
 type NumberValues = readonly [number, ...number[]]
@@ -44,15 +45,27 @@ export type StringConfigField = BaseField & {
 	default: string
 }
 
-export type NumberConfigField = BaseField & {
+type BaseNumberConfigField = BaseField & {
 	kind: "number"
 	default: number
+	valueDescriptions?: Record<string, string>
+}
+
+export type RangedNumberConfigField = BaseNumberConfigField & {
 	min?: number
 	max?: number
 	step?: number
-	values?: NumberValues
-	valueDescriptions?: Record<string, string>
+	values?: never
 }
+
+export type ValuedNumberConfigField = BaseNumberConfigField & {
+	values: NumberValues
+	min?: never
+	max?: never
+	step?: never
+}
+
+export type NumberConfigField = RangedNumberConfigField | ValuedNumberConfigField
 
 export type ScopedConfigField = EnumConfigField | BooleanConfigField | StringConfigField | NumberConfigField
 export type ConfigFromFields<Fields extends readonly ScopedConfigField[]> = {
@@ -146,7 +159,7 @@ export function createScopedConfigSchema(fields: readonly ScopedConfigField[]): 
 
 export function defineScopedConfigSpec<const Fields extends readonly ScopedConfigField[]>(options: {
 	fileName: string
-	scopes?: ConfigScopes
+	scope?: ConfigScopeMode
 	fields: Fields & ValidateEnumDefaults<Fields> & ValidateNumberDefaults<Fields>
 }): ScopedConfigSpec<ConfigFromFields<Fields>> & {
 	fields: Fields
@@ -156,8 +169,7 @@ export function defineScopedConfigSpec<const Fields extends readonly ScopedConfi
 	const schema = createScopedConfigSchema(options.fields)
 	const defaults = defaultConfig(options.fields) as ConfigDefaults<Config>
 	const validator = Schema.Compile(schema)
-	const scopes = options.scopes ?? (["user", "workspace"] as const)
-	validateScopes(scopes)
+	const scopes = normalizeScopeMode(options.scope)
 
 	function get<Key extends keyof Config>(config: Config, key: Key): NonNullable<Config[Key]> {
 		const value = getConfigValue(config, String(key))
@@ -174,7 +186,7 @@ export function defineScopedConfigSpec<const Fields extends readonly ScopedConfi
 		try {
 			return validator.Parse(JSON.parse(raw)) as Config
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error)
+			const message = formatConfigParseError(error)
 			throw new Error(`Invalid config at ${path}: ${message}`)
 		}
 	}
@@ -221,12 +233,12 @@ export function defineScopedConfigSpec<const Fields extends readonly ScopedConfi
 	}
 }
 
-function validateScopes(scopes: ConfigScopes): void {
-	const seen = new Set<ConfigScope>()
-	for (const scope of scopes) {
-		if (seen.has(scope)) throw new Error(`Duplicate config scope: ${scope}`)
-		seen.add(scope)
-	}
+function normalizeScopeMode(scope: ConfigScopeMode | undefined): ConfigScopes {
+	const mode = scope ?? "both"
+	if (mode === "user") return ["user"] as const
+	if (mode === "workspace") return ["workspace"] as const
+	if (mode === "both") return ["user", "workspace"] as const
+	throw new Error(`Invalid config scope mode: ${String(mode)}`)
 }
 
 function validateFields(fields: readonly ScopedConfigField[]): void {
@@ -246,17 +258,37 @@ function validateFields(fields: readonly ScopedConfigField[]): void {
 	}
 	for (const field of fields) {
 		if (field.kind !== "number") continue
+		const rawRangeOptions = field as { min?: number; max?: number; step?: number }
+		if (
+			field.values !== undefined &&
+			(rawRangeOptions.min !== undefined || rawRangeOptions.max !== undefined || rawRangeOptions.step !== undefined)
+		) {
+			throw new Error(`Number field ${field.key} cannot combine values with min, max, or step`)
+		}
+		if (!Number.isFinite(field.default)) throw new Error(`Number field ${field.key} default must be finite`)
+		if (field.values !== undefined) {
+			if (field.values.length === 0) throw new Error(`Number field ${field.key} values must have at least one value`)
+			for (const value of field.values) {
+				if (!Number.isFinite(value)) throw new Error(`Number field ${field.key} values must be finite`)
+			}
+			if (!field.values.includes(field.default)) {
+				throw new Error(`Number field ${field.key} default must be one of: ${field.values.join(", ")}`)
+			}
+			continue
+		}
+		if (field.min !== undefined && !Number.isFinite(field.min)) throw new Error(`Number field ${field.key} min must be finite`)
+		if (field.max !== undefined && !Number.isFinite(field.max)) throw new Error(`Number field ${field.key} max must be finite`)
 		if (field.step !== undefined && (!Number.isFinite(field.step) || field.step <= 0)) {
 			throw new Error(`Number field ${field.key} step must be a positive finite number`)
 		}
 		if (field.min !== undefined && field.max !== undefined && field.min > field.max) {
 			throw new Error(`Number field ${field.key} min must be less than or equal to max`)
 		}
-		if (field.values) {
-			if (field.values.length === 0) throw new Error(`Number field ${field.key} values must have at least one value`)
-			if (!field.values.includes(field.default)) {
-				throw new Error(`Number field ${field.key} default must be one of: ${field.values.join(", ")}`)
-			}
+		if (field.min !== undefined && field.default < field.min) {
+			throw new Error(`Number field ${field.key} default must be at least ${field.min}`)
+		}
+		if (field.max !== undefined && field.default > field.max) {
+			throw new Error(`Number field ${field.key} default must be at most ${field.max}`)
 		}
 	}
 }
@@ -290,4 +322,21 @@ function defaultConfig(fields: readonly ScopedConfigField[]): Record<string, unk
 
 export function getConfigValue(config: object, key: string): unknown {
 	return (config as Record<string, unknown>)[key]
+}
+
+function formatConfigParseError(error: unknown): string {
+	const errors = error && typeof error === "object" ? (error as { errors?: unknown }).errors : undefined
+	if (Array.isArray(errors) && errors.length > 0) return errors.map(formatSchemaError).join("; ")
+	if (error instanceof Error && error.message) return error.message
+	return String(error)
+}
+
+function formatSchemaError(error: unknown): string {
+	if (!error || typeof error !== "object") return String(error)
+	const { instancePath, message: errorMessage, keyword } = error as { instancePath?: unknown; message?: unknown; keyword?: unknown }
+	const path = typeof instancePath === "string" && instancePath ? instancePath : "/"
+	let message = String(error)
+	if (typeof errorMessage === "string" && errorMessage) message = errorMessage
+	else if (typeof keyword === "string") message = `failed ${keyword}`
+	return `${path} ${message}`
 }

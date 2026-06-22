@@ -18,6 +18,7 @@ Exports:
 - `createScopedConfigSchema()`
 - `ConfigScopes`
 - `ConfigScope`
+- `ConfigScopeMode`
 - `ScopedConfig`
 - `ScopedConfigField`
 - `ScopedConfigSpec`
@@ -31,25 +32,25 @@ Config files use fixed Pi scopes by default:
 Workspace values override User values. Missing files read as empty config.
 Invalid JSON/schema throws a diagnostic error with the file path.
 
-Use `scopes` to restrict a spec to one scope:
+Use `scope` to restrict a spec to one scope:
 
 ```ts
 defineScopedConfigSpec({
 	fileName: "my-extension.json",
-	scopes: ["workspace"],
+	scope: "workspace",
 	fields: [/* ... */]
 })
 ```
 
-Default is `["user", "workspace"]`. Merge order follows `scopes`, so later
-scopes override earlier scopes.
+Default is `scope: "both"`. Workspace always overrides User. `scope` accepts
+`"user"`, `"workspace"`, or `"both"`; callers cannot configure scope order.
 
 Fields support optional `description` and `valueDescriptions`; `ScopedConfigEditor`
 renders the active field and set value descriptions under the field list.
 String fields are edited inline; use the include toggle to unset a value.
-Number fields support `min`, `max`, `step`, or explicit `values`. `step` controls
-UI stepping only. Number fields with `values` cycle through those values; other
-number fields can be edited inline.
+Number fields support either `min`/`max`/`step` or explicit `values`, not both.
+`step` controls UI stepping only. Number fields with `values` cycle through those
+values; other number fields can be edited inline.
 
 ## Related projects
 
