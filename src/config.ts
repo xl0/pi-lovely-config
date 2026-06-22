@@ -1,12 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { dirname, join, resolve } from "node:path"
+import { dirname, isAbsolute, join, resolve } from "node:path"
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent"
 import { type TObject, type TSchema, Type } from "typebox"
-import Schema from "typebox/schema"
 
 export type ConfigScope = "user" | "workspace"
 export type ConfigScopeMode = ConfigScope | "both"
-export type ScopedConfig<Config extends object> = Record<ConfigScope, Config>
+export type ConfigPatch<Config extends object> = Partial<Config> & Record<string, unknown>
+export type ScopedConfigPatch<Config extends object> = Record<ConfigScope, ConfigPatch<Config>>
+export type ResolvedConfig<Config extends object> = { [Key in keyof Config]-?: NonNullable<Config[Key]> } & Record<string, unknown>
 export type ConfigScopes = readonly [ConfigScope] | readonly ["user", "workspace"]
 
 type EnumValues = readonly [string, ...string[]]
@@ -69,10 +70,9 @@ export type NumberConfigField = RangedNumberConfigField | ValuedNumberConfigFiel
 
 export type ScopedConfigField = EnumConfigField | BooleanConfigField | StringConfigField | NumberConfigField
 export type ConfigFromFields<Fields extends readonly ScopedConfigField[]> = {
-	[Field in Fields[number] as Field["key"]]?: FieldValue<Field>
+	[Field in Fields[number] as Field["key"]]: FieldValue<Field>
 }
 
-export type ConfigDefaults<Config extends object> = { [Key in keyof Config]-?: NonNullable<Config[Key]> } & Record<string, unknown>
 type FieldValue<Field> = Field extends { kind: "enum"; values: infer Values extends readonly string[] }
 	? Values[number]
 	: Field extends { kind: "boolean" }
@@ -112,39 +112,39 @@ export type ScopedConfigSpec<Config extends object> = {
 	scopes: ConfigScopes
 	fields: readonly ScopedConfigField[]
 	schema: TSchema
-	defaults: ConfigDefaults<Config>
-	get<Key extends keyof Config>(config: Config, key: Key): NonNullable<Config[Key]>
+	defaults: ResolvedConfig<Config>
+	get<Key extends keyof Config>(config: ConfigPatch<Config> | ResolvedConfig<Config>, key: Key): NonNullable<Config[Key]>
 	getPath(scope: ConfigScope, cwd: string): string
-	readFileOrEmpty(path: string): Config
-	writeFile(path: string, config: Config): void
+	readFileOrEmpty(path: string): ConfigPatch<Config>
+	saveFile(path: string, config: ConfigPatch<Config>): void
 	deleteFile(path: string): void
-	merge(scoped: ScopedConfig<Config>): Config
-	loadScoped(cwd: string): ScopedConfig<Config>
-	load(cwd: string): Config
+	resolve(scoped: ScopedConfigPatch<Config>): ResolvedConfig<Config>
+	loadScoped(cwd: string): ScopedConfigPatch<Config>
+	load(cwd: string): ResolvedConfig<Config>
 }
 
 export class ScopedConfigState<Config extends object> {
-	private effective: Config = {} as Config
+	private resolved: ResolvedConfig<Config> = {} as ResolvedConfig<Config>
 
 	constructor(readonly spec: ScopedConfigSpec<Config>) {}
 
-	load(cwd: string): Config {
-		this.effective = this.spec.load(cwd)
-		return this.effective
+	load(cwd: string): ResolvedConfig<Config> {
+		this.resolved = this.spec.load(cwd)
+		return this.resolved
 	}
 
-	set(next: Config): Config {
-		this.effective = next
-		return this.effective
+	set(next: ResolvedConfig<Config>): ResolvedConfig<Config> {
+		this.resolved = next
+		return this.resolved
 	}
 
-	reset(): Config {
-		this.effective = {} as Config
-		return this.effective
+	reset(): ResolvedConfig<Config> {
+		this.resolved = this.spec.resolve(emptyScopedConfig())
+		return this.resolved
 	}
 
 	get<Key extends keyof Config>(key: Key): NonNullable<Config[Key]> {
-		return this.spec.get(this.effective, key)
+		return this.spec.get(this.resolved, key)
 	}
 }
 
@@ -154,7 +154,7 @@ export function createScopedConfigSchema(fields: readonly ScopedConfigField[]): 
 	for (const field of fields) {
 		properties[field.key] = Type.Optional(createFieldSchema(field))
 	}
-	return Type.Object(properties)
+	return Type.Object(properties, { additionalProperties: true })
 }
 
 export function defineScopedConfigSpec<const Fields extends readonly ScopedConfigField[]>(options: {
@@ -166,12 +166,12 @@ export function defineScopedConfigSpec<const Fields extends readonly ScopedConfi
 	schema: TObject
 } {
 	type Config = ConfigFromFields<Fields>
+	validateConfigFileName(options.fileName)
 	const schema = createScopedConfigSchema(options.fields)
-	const defaults = defaultConfig(options.fields) as ConfigDefaults<Config>
-	const validator = Schema.Compile(schema)
+	const defaults = defaultConfig(options.fields) as ResolvedConfig<Config>
 	const scopes = normalizeScopeMode(options.scope)
 
-	function get<Key extends keyof Config>(config: Config, key: Key): NonNullable<Config[Key]> {
+	function get<Key extends keyof Config>(config: ConfigPatch<Config> | ResolvedConfig<Config>, key: Key): NonNullable<Config[Key]> {
 		const value = getConfigValue(config, String(key))
 		return (value === undefined ? defaults[key] : value) as NonNullable<Config[Key]>
 	}
@@ -180,40 +180,64 @@ export function defineScopedConfigSpec<const Fields extends readonly ScopedConfi
 		return scope === "user" ? join(getAgentDir(), options.fileName) : resolve(cwd, CONFIG_DIR_NAME, options.fileName)
 	}
 
-	function readFileOrEmpty(path: string): Config {
-		if (!existsSync(path)) return {} as Config
+	function readFileOrEmpty(path: string): ConfigPatch<Config> {
+		if (!existsSync(path)) return {} as ConfigPatch<Config>
 		const raw = readFileSync(path, "utf-8")
 		try {
-			return validator.Parse(JSON.parse(raw)) as Config
+			return parseConfigPatch(JSON.parse(raw))
 		} catch (error) {
 			const message = formatConfigParseError(error)
 			throw new Error(`Invalid config at ${path}: ${message}`)
 		}
 	}
 
-	function writeFile(path: string, config: Config): void {
+	function saveFile(path: string, config: ConfigPatch<Config>): void {
+		let parsed: ConfigPatch<Config>
+		try {
+			parsed = parseConfigPatch(config)
+		} catch (error) {
+			const message = formatConfigParseError(error)
+			throw new Error(`Invalid config at ${path}: ${message}`)
+		}
+		if (Object.keys(parsed).length === 0) {
+			deleteFile(path)
+			return
+		}
 		mkdirSync(dirname(path), { recursive: true })
-		writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, "utf-8")
+		writeFileSync(path, `${JSON.stringify(parsed, null, 2)}\n`, "utf-8")
 	}
 
 	function deleteFile(path: string): void {
 		rmSync(path, { force: true })
 	}
 
-	function merge(scoped: ScopedConfig<Config>): Config {
-		let merged = {} as Config
-		for (const scope of scopes) merged = { ...merged, ...scoped[scope] }
-		return merged
+	function resolveScoped(scoped: ScopedConfigPatch<Config>): ResolvedConfig<Config> {
+		let resolved = { ...defaults }
+		for (const scope of scopes) resolved = { ...resolved, ...scoped[scope] }
+		return resolved as ResolvedConfig<Config>
 	}
 
-	function loadScoped(cwd: string): ScopedConfig<Config> {
-		const scoped = { user: {} as Config, workspace: {} as Config }
+	function loadScoped(cwd: string): ScopedConfigPatch<Config> {
+		const scoped = emptyScopedConfig<Config>()
 		for (const scope of scopes) scoped[scope] = readFileOrEmpty(getPath(scope, cwd))
 		return scoped
 	}
 
-	function load(cwd: string): Config {
-		return merge(loadScoped(cwd))
+	function load(cwd: string): ResolvedConfig<Config> {
+		return resolveScoped(loadScoped(cwd))
+	}
+
+	function parseConfigPatch(value: unknown): ConfigPatch<Config> {
+		if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("must be an object")
+		const parsed = value as Record<string, unknown>
+		const config: Record<string, unknown> = {}
+		for (const field of options.fields) {
+			const fieldValue = parsed[field.key]
+			if (fieldValue === undefined) continue
+			validateConfigValue(field, fieldValue)
+			config[field.key] = fieldValue
+		}
+		return config as ConfigPatch<Config>
 	}
 
 	return {
@@ -225,11 +249,21 @@ export function defineScopedConfigSpec<const Fields extends readonly ScopedConfi
 		get,
 		getPath,
 		readFileOrEmpty,
-		writeFile,
+		saveFile,
 		deleteFile,
-		merge,
+		resolve: resolveScoped,
 		loadScoped,
 		load
+	}
+}
+
+function emptyScopedConfig<Config extends object>(): ScopedConfigPatch<Config> {
+	return { user: {}, workspace: {} }
+}
+
+function validateConfigFileName(fileName: string): void {
+	if (!fileName || fileName === "." || fileName === ".." || isAbsolute(fileName) || fileName.includes("/") || fileName.includes("\\")) {
+		throw new Error(`Invalid config file name: ${fileName}`)
 	}
 }
 
@@ -311,6 +345,29 @@ function createFieldSchema(field: ScopedConfigField): TSchema {
 				...(field.min === undefined ? {} : { minimum: field.min }),
 				...(field.max === undefined ? {} : { maximum: field.max })
 			})
+	}
+}
+
+function validateConfigValue(field: ScopedConfigField, value: unknown): void {
+	switch (field.kind) {
+		case "enum":
+			if (typeof value !== "string" || !field.values.includes(value)) {
+				throw new Error(`/${field.key} must be one of: ${field.values.join(", ")}`)
+			}
+			return
+		case "boolean":
+			if (typeof value !== "boolean") throw new Error(`/${field.key} must be boolean`)
+			return
+		case "string":
+			if (typeof value !== "string") throw new Error(`/${field.key} must be string`)
+			return
+		case "number":
+			if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`/${field.key} must be number`)
+			if (field.values !== undefined && !field.values.includes(value)) {
+				throw new Error(`/${field.key} must be one of: ${field.values.join(", ")}`)
+			}
+			if (field.min !== undefined && value < field.min) throw new Error(`/${field.key} must be at least ${field.min}`)
+			if (field.max !== undefined && value > field.max) throw new Error(`/${field.key} must be at most ${field.max}`)
 	}
 }
 

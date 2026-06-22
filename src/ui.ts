@@ -9,23 +9,23 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi
 } from "@earendil-works/pi-tui"
-import type { ConfigDefaults, ConfigScope, ScopedConfig, ScopedConfigField, ScopedConfigSpec } from "./config"
+import type { ConfigPatch, ConfigScope, ResolvedConfig, ScopedConfigField, ScopedConfigPatch, ScopedConfigSpec } from "./config"
 import { getConfigValue } from "./config"
 
 type RenderTui = { requestRender(): void }
 
-type ScopedConfigChangeHandler<Config extends object> = (effective: Config, scoped: ScopedConfig<Config>) => void
+type ScopedConfigChangeHandler<Config extends object> = (resolved: ResolvedConfig<Config>, scoped: ScopedConfigPatch<Config>) => void
 type FocusPart = "include" | "value"
 
 export class ScopedConfigEditor<Config extends object> {
-	private scoped: ScopedConfig<Config>
+	private scoped: ScopedConfigPatch<Config>
 	private readonly tui: RenderTui
 	private readonly theme: Theme
 	private readonly ctx: ExtensionContext
 	private readonly spec: ScopedConfigSpec<Config>
 	private readonly onChange: ScopedConfigChangeHandler<Config>
 	private readonly fields: readonly ScopedConfigField[]
-	private readonly defaults: ConfigDefaults<Config>
+	private readonly defaults: ResolvedConfig<Config>
 	private readonly scopes: readonly ConfigScope[]
 	private readonly done: (result: undefined) => void
 	private activeInput: Input | undefined
@@ -39,7 +39,7 @@ export class ScopedConfigEditor<Config extends object> {
 		theme: Theme
 		ctx: ExtensionContext
 		spec: ScopedConfigSpec<Config>
-		scoped: ScopedConfig<Config>
+		scoped: ScopedConfigPatch<Config>
 		onChange: ScopedConfigChangeHandler<Config>
 		done: (result: undefined) => void
 	}) {
@@ -238,7 +238,7 @@ export class ScopedConfigEditor<Config extends object> {
 		else lines.push("")
 	}
 
-	private renderFieldValue(config: Config, field: ScopedConfigField, selected: boolean, width: number): string {
+	private renderFieldValue(config: ConfigPatch<Config>, field: ScopedConfigField, selected: boolean, width: number): string {
 		if (selected && this.focusPart === "value" && this.activeInput) {
 			if (field.kind === "string") return renderStringInput(this.activeInput, width)
 			if (field.kind === "number" && !field.values) return renderInput(this.activeInput, width)
@@ -277,8 +277,8 @@ export class ScopedConfigEditor<Config extends object> {
 	}
 
 	private visibleFields(scope: ConfigScope = this.currentScope()): ScopedConfigField[] {
-		const effective = this.resolvedConfig(scope)
-		return this.fields.filter(field => isFieldVisible(field, scope, this.scoped, effective))
+		const resolved = this.resolvedConfig(scope)
+		return this.fields.filter(field => isFieldVisible(field, scope, this.scoped, resolved))
 	}
 
 	private selectedField(fields: readonly ScopedConfigField[] = this.visibleFields()): ScopedConfigField | undefined {
@@ -486,20 +486,15 @@ export class ScopedConfigEditor<Config extends object> {
 		this.save(this.currentScope(), setConfigValue(this.scoped[this.currentScope()], field.key, nextNumberValue(field, base)))
 	}
 
-	private save(scope: ConfigScope, nextConfig: Config): void {
+	private save(scope: ConfigScope, nextConfig: ConfigPatch<Config>): void {
 		this.scoped = { ...this.scoped, [scope]: nextConfig }
-		const path = this.spec.getPath(scope, this.ctx.cwd)
-		if (Object.keys(nextConfig).length === 0) this.spec.deleteFile(path)
-		else this.spec.writeFile(path, nextConfig)
-		this.onChange(this.spec.merge(this.scoped), this.scoped)
+		this.spec.saveFile(this.spec.getPath(scope, this.ctx.cwd), nextConfig)
+		this.onChange(this.spec.resolve(this.scoped), this.scoped)
 		this.refresh()
 	}
 
 	private reset(scope: ConfigScope): void {
-		this.scoped = { ...this.scoped, [scope]: {} as Config }
-		this.spec.deleteFile(this.spec.getPath(scope, this.ctx.cwd))
-		this.onChange(this.spec.merge(this.scoped), this.scoped)
-		this.refresh()
+		this.save(scope, {})
 	}
 }
 
@@ -518,22 +513,22 @@ function addWrappedWithPrefix(lines: string[], width: number, prefix: string, te
 function isFieldVisible<Config extends object>(
 	field: ScopedConfigField,
 	scope: ConfigScope,
-	configs: ScopedConfig<Config>,
-	effective: Record<string, unknown>
+	configs: ScopedConfigPatch<Config>,
+	resolved: Record<string, unknown>
 ): boolean {
 	if (!field.visibleWhen) return true
 	return field.visibleWhen({
 		scope,
-		get: key => effective[key],
+		get: key => resolved[key],
 		getScoped: (key, targetScope = scope) => getConfigValue(configs[targetScope], key)
 	})
 }
 
-function setConfigValue<Config extends object>(config: Config, key: string, value: unknown): Config {
+function setConfigValue<Config extends object>(config: ConfigPatch<Config>, key: string, value: unknown): ConfigPatch<Config> {
 	const next = { ...(config as Record<string, unknown>) }
 	if (value === undefined) delete next[key]
 	else next[key] = value
-	return next as Config
+	return next as ConfigPatch<Config>
 }
 
 function fieldUsesInput(field: ScopedConfigField): boolean {
@@ -577,7 +572,7 @@ function isNumberInputControl(data: string): boolean {
 	return kb.matches(data, "tui.editor.deleteCharBackward") || kb.matches(data, "tui.editor.deleteCharForward")
 }
 
-function cycleField<Config extends object>(config: Config, field: ScopedConfigField): Config {
+function cycleField<Config extends object>(config: ConfigPatch<Config>, field: ScopedConfigField): ConfigPatch<Config> {
 	const current = formatScopedValue(config, field)
 	if (field.kind === "number") return setConfigValue(config, field.key, nextNumberValue(field, getConfigValue(config, field.key)))
 	const options = field.kind === "enum" ? field.values : ["on", "off"]
@@ -636,7 +631,7 @@ function formatFieldValue(field: ScopedConfigField, value: unknown): string {
 function getScopeNote<Config extends object>(
 	scope: ConfigScope,
 	scopes: readonly ConfigScope[],
-	configs: ScopedConfig<Config>,
+	configs: ScopedConfigPatch<Config>,
 	field: ScopedConfigField
 ): string | undefined {
 	const userValue = getConfigValue(configs.user, field.key)
