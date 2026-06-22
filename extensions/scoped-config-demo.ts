@@ -43,6 +43,30 @@ const demoFields = [
 		default: "sent from pi"
 	},
 	{
+		key: "temperature",
+		label: "Temperature",
+		description: "Number field with min, max, and step. Space steps through values; direct edit accepts numbers",
+		kind: "number",
+		min: 0,
+		max: 2,
+		step: 0.1,
+		default: 0.7
+	},
+	{
+		key: "retries",
+		label: "Retries",
+		description: "Number field with explicit values. Space cycles values; direct edit is disabled",
+		kind: "number",
+		values: [0, 1, 2, 3],
+		valueDescriptions: {
+			0: "No retries",
+			1: "Retry once",
+			2: "Retry twice",
+			3: "Retry three times"
+		},
+		default: 1
+	},
+	{
 		key: "detailLevel",
 		label: "Detail level",
 		description: "Conditional enum field. Visible only while Compact mode is not on",
@@ -182,6 +206,8 @@ function formatEffectiveConfig<Config extends object>(state: ScopedConfigState<C
 		`theme=${state.get("theme" as keyof Config)}`,
 		`compact=${state.get("compactMode" as keyof Config) === true ? "on" : "off"}`,
 		`signature=${JSON.stringify(state.get("signature" as keyof Config))}`,
+		`temperature=${state.get("temperature" as keyof Config)}`,
+		`retries=${state.get("retries" as keyof Config)}`,
 		`detail=${state.get("detailLevel" as keyof Config)}`,
 		`experimental=${state.get("experimental" as keyof Config) === true ? "on" : "off"}`,
 		`experiment=${state.get("experimentMode" as keyof Config)}`
