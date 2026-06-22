@@ -124,22 +124,39 @@ export type ScopedConfigSpec<Config extends object> = {
 }
 
 export class ScopedConfigState<Config extends object> {
+	private scoped: ScopedConfigPatch<Config> = emptyScopedConfig()
 	private resolved: ResolvedConfig<Config> = {} as ResolvedConfig<Config>
 
-	constructor(readonly spec: ScopedConfigSpec<Config>) {}
+	constructor(readonly spec: ScopedConfigSpec<Config>) {
+		this.resolved = spec.resolve(this.scoped)
+	}
+
+	loadScoped(cwd: string): ScopedConfigPatch<Config> {
+		this.scoped = this.spec.loadScoped(cwd)
+		this.resolved = this.spec.resolve(this.scoped)
+		return this.scoped
+	}
 
 	load(cwd: string): ResolvedConfig<Config> {
-		this.resolved = this.spec.load(cwd)
+		this.loadScoped(cwd)
 		return this.resolved
 	}
 
-	set(next: ResolvedConfig<Config>): ResolvedConfig<Config> {
-		this.resolved = next
+	setScoped(next: ScopedConfigPatch<Config>): ResolvedConfig<Config> {
+		this.scoped = next
+		this.resolved = this.spec.resolve(next)
 		return this.resolved
 	}
 
 	reset(): ResolvedConfig<Config> {
-		this.resolved = this.spec.resolve(emptyScopedConfig())
+		return this.setScoped(emptyScopedConfig())
+	}
+
+	getScoped(): ScopedConfigPatch<Config> {
+		return this.scoped
+	}
+
+	getResolved(): ResolvedConfig<Config> {
 		return this.resolved
 	}
 

@@ -14,7 +14,7 @@ Public API:
 
 - `defineScopedConfigSpec()` to declare fields, defaults, schema, paths, load/write/delete, and user/workspace merge semantics.
 - `createScopedConfigSchema()` for TypeBox schemas from fields.
-- `ScopedConfigState` for in-memory resolved config access.
+- `ScopedConfigState` for in-memory scoped patch and resolved config access.
 - `ScopedConfigEditor` custom TUI component for editing user/workspace scopes.
 - Types for scopes, specs, fields, and field-derived config.
 
