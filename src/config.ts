@@ -20,7 +20,7 @@ type BaseField = {
 	key: string
 	label: string
 	description?: string
-	kind: "enum" | "boolean"
+	kind: "enum" | "boolean" | "string"
 	depth?: number
 	visibleWhen?: (ctx: VisibilityContext) => boolean
 }
@@ -38,7 +38,12 @@ export type BooleanConfigField = BaseField & {
 	default: boolean
 }
 
-export type ScopedConfigField = EnumConfigField | BooleanConfigField
+export type StringConfigField = BaseField & {
+	kind: "string"
+	default: string
+}
+
+export type ScopedConfigField = EnumConfigField | BooleanConfigField | StringConfigField
 export type ConfigFromFields<Fields extends readonly ScopedConfigField[]> = {
 	[Field in Fields[number] as Field["key"]]?: FieldValue<Field>
 }
@@ -48,7 +53,9 @@ type FieldValue<Field> = Field extends { kind: "enum"; values: infer Values exte
 	? Values[number]
 	: Field extends { kind: "boolean" }
 		? boolean
-		: never
+		: Field extends { kind: "string" }
+			? string
+			: never
 type ValidateEnumDefaults<Fields extends readonly ScopedConfigField[]> = {
 	[Index in keyof Fields]: Fields[Index] extends {
 		kind: "enum"
@@ -220,6 +227,8 @@ function createFieldSchema(field: ScopedConfigField): TSchema {
 			return Type.Union(field.values.map(value => Type.Literal(value)) as unknown as [TSchema, ...TSchema[]], { default: field.default })
 		case "boolean":
 			return Type.Boolean({ default: field.default })
+		case "string":
+			return Type.String({ default: field.default })
 	}
 }
 

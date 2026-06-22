@@ -46,6 +46,7 @@ scopes override earlier scopes.
 
 Fields support optional `description` and `valueDescriptions`; `ScopedConfigEditor`
 renders the active field and set value descriptions under the field list.
+String fields are edited inline; use the include toggle to unset a value.
 
 ## Related projects
 
