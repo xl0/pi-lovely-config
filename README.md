@@ -45,3 +45,17 @@ Default is `["user", "workspace"]`. Merge order follows `scopes`, so later
 scopes override earlier scopes.
 
 Fields support optional `description` and `valueDescriptions`; `ScopedConfigEditor`
+renders the active field and set value descriptions under the field list.
+
+## Related projects
+
+|  |  |
+| --- | --- |
+| [Pi Lovely Web](https://github.com/xl0/pi-lovely-web) | `web_search`, `web_fetch`, `web_image` tools |
+| [Pi Lovely Dev Tools](https://github.com/xl0/pi-lovely-dev-tools) | interactive debugging helpers `/tool`, `/show-sysprompt`, `/show-context`, `/llm-stats` |
+| [Pi Lovely Codex](https://github.com/xl0/pi-lovely-codex) | GPT fast mode and Codex-style `apply_patch` |
+| [Pi Lovely IDE](https://github.com/xl0/pi-lovely-ide) | IDE integration |
+
+---
+
+Like this work? [Hire me](https://alexey.work/cv?ref=pi-lovely-config)
