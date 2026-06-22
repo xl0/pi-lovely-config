@@ -62,9 +62,9 @@ values; other number fields can be edited inline.
 |  |  |
 | --- | --- |
 | [Pi Lovely Web](https://github.com/xl0/pi-lovely-web) | `web_search`, `web_fetch`, `web_image` tools |
-| [Pi Lovely Dev Tools](https://github.com/xl0/pi-lovely-dev-tools) | interactive debugging helpers `/tool`, `/show-sysprompt`, `/show-context`, `/llm-stats` |
+| [Pi Lovely Dev Tools](https://github.com/xl0/pi-lovely-dev-tools) | `/tool`, `/show-sysprompt`, `/show-context`, `/llm-stats` |
 | [Pi Lovely Codex](https://github.com/xl0/pi-lovely-codex) | GPT fast mode and Codex-style `apply_patch` |
-| [Pi Lovely IDE](https://github.com/xl0/pi-lovely-ide) | IDE integration |
+| [Pi Lovely IDE](https://github.com/xl0/pi-lovely-ide) | Interactive IDE integration |
 
 ---
 
