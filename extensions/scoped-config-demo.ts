@@ -3,9 +3,9 @@ import {
 	type ConfigScopes,
 	defineScopedConfigSpec,
 	ScopedConfigEditor,
+	type ScopedConfigField,
 	type ScopedConfigSpec,
-	ScopedConfigState,
-	type VisibilityContext
+	ScopedConfigState
 } from "../src/index"
 
 type ScopeDemoMode = "user" | "workspace" | "both"
@@ -14,40 +14,68 @@ const demoFields = [
 	{
 		key: "theme",
 		label: "Theme",
+		description: "Cycles an enum value. Workspace overrides user when both scopes are active",
 		kind: "enum",
 		values: ["system", "light", "dark"],
+		valueDescriptions: {
+			system: "Follow Pi's current theme",
+			light: "Prefer a light presentation",
+			dark: "Prefer a dark presentation"
+		},
 		default: "system"
 	},
 	{
 		key: "compactMode",
 		label: "Compact mode",
+		description: "Boolean field. Turning it on hides Detail level via visibleWhen",
 		kind: "boolean",
+		valueDescriptions: {
+			on: "Enable compact mode and hide Detail level",
+			off: "Disable compact mode and show Detail level"
+		},
 		default: false
 	},
 	{
 		key: "detailLevel",
 		label: "Detail level",
+		description: "Conditional enum field. Visible only while Compact mode is not on",
 		kind: "enum",
 		values: ["low", "medium", "high"],
+		valueDescriptions: {
+			low: "Show terse details",
+			medium: "Show balanced details",
+			high: "Show verbose details"
+		},
 		default: "medium",
-		visibleWhen: (ctx: VisibilityContext) => ctx.get("compactMode") !== true
+		visibleWhen: ctx => ctx.get("compactMode") !== true
 	},
 	{
 		key: "experimental",
 		label: "Experimental options",
+		description: "Parent toggle for an indented child field",
 		kind: "boolean",
+		valueDescriptions: {
+			on: "Show experimental child options",
+			off: "Hide experimental child options"
+		},
 		default: false
 	},
 	{
 		key: "experimentMode",
 		label: "Experiment mode",
+		description: "Indented child field. Visible only when Experimental options is on",
 		kind: "enum",
 		values: ["safe", "fast", "weird"],
+		valueDescriptions: {
+			safe: "Prefer predictable behavior",
+			fast: "Prefer speed over caution",
+			weird: "Exercise unusual enum values"
+		},
 		default: "safe",
 		depth: 1,
-		visibleWhen: (ctx: VisibilityContext) => ctx.get("experimental") === true
+		visibleWhen: ctx => ctx.get("experimental") === true
 	}
-] as const
+] as const satisfies readonly ScopedConfigField[]
 
 const scopeDemoConfigs = {
 	user: defineScopeDemoConfig("user", ["user"]),
@@ -70,8 +98,14 @@ function defineScopeDemoConfig(mode: ScopeDemoMode, scopes: ConfigScopes) {
 			{
 				key: "scopeMarker",
 				label: "Scope marker",
+				description: "Extra field for this scope-mode demo config file",
 				kind: "enum",
 				values: ["alpha", "beta", "gamma"],
+				valueDescriptions: {
+					alpha: "First marker value",
+					beta: "Second marker value",
+					gamma: "Third marker value"
+				},
 				default: "alpha"
 			}
 		] as const

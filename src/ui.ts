@@ -54,7 +54,9 @@ export class ScopedConfigEditor<Config extends object> {
 		lines.push("")
 		this.renderScopeHeader(lines, renderWidth)
 		lines.push("")
+		this.renderActiveFieldDescription(lines, renderWidth, rows)
 		this.renderRows(lines, renderWidth, scope, rows)
+		lines.push("")
 		lines.push("")
 		addWrappedWithPrefix(
 			lines,
@@ -90,7 +92,7 @@ export class ScopedConfigEditor<Config extends object> {
 			this.activateRow()
 			return
 		}
-		if (matchesKey(data, Key.escape)) this.done(undefined)
+		if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c"))) this.done(undefined)
 	}
 
 	private renderTabs(lines: string[], width: number): void {
@@ -131,6 +133,8 @@ export class ScopedConfigEditor<Config extends object> {
 
 			const prefix = this.theme.fg(selected ? "accent" : "muted", `${selected ? "> " : "  "}${"  ".repeat(row.field.depth ?? 0)}`)
 			const value = formatScopedValue(this.scoped[scope], row.field)
+			const valueDescription = getValueDescription(this.scoped[scope], row.field)
+			const renderedValueDescription = valueDescription ? ` ${this.theme.fg("muted", `(${valueDescription})`)}` : ""
 			const note = getScopeNote(scope, this.scopes, this.scoped, row.field)
 			const renderedNote = note ? ` ${this.theme.fg("muted", `(${note})`)}` : ""
 			const valueStyle = value === "unset" ? "muted" : "accent"
@@ -138,9 +142,17 @@ export class ScopedConfigEditor<Config extends object> {
 				lines,
 				width,
 				prefix,
-				`${this.theme.fg("text", row.field.label)}  ${this.theme.fg(valueStyle, value)}${renderedNote}`
+				`${this.theme.fg("text", row.field.label)}  ${this.theme.fg(valueStyle, value)}${renderedValueDescription}${renderedNote}`
 			)
 		}
+	}
+
+	private renderActiveFieldDescription(lines: string[], width: number, rows: Row[]): void {
+		const row = rows[this.currentRow]
+		if (row?.kind === "field" && row.field.description)
+			addWrappedWithPrefix(lines, width, " ", this.theme.fg("muted", row.field.description))
+		else lines.push("")
+		lines.push("")
 	}
 
 	private renderResetRow(lines: string[], width: number, selected: boolean): void {
@@ -265,6 +277,13 @@ function nextOption<T extends string>(options: readonly T[], value: T): T {
 function formatScopedValue(config: object, field: ScopedConfigField): string {
 	const value = getConfigValue(config, field.key)
 	return formatFieldValue(field, value)
+}
+
+function getValueDescription(config: object, field: ScopedConfigField): string | undefined {
+	const value = formatScopedValue(config, field)
+	if (value === "unset") return undefined
+	const description = field.kind === "enum" ? field.valueDescriptions?.[value] : field.valueDescriptions?.[value as "on" | "off"]
+	return description
 }
 
 function formatFieldValue(field: ScopedConfigField, value: unknown): string {
