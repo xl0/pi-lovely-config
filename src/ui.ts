@@ -12,7 +12,6 @@ import {
 import type { ConfigDefaults, ConfigScope, ScopedConfig, ScopedConfigField, ScopedConfigSpec } from "./config"
 import { getConfigValue } from "./config"
 
-type Row = { kind: "field"; field: ScopedConfigField } | { kind: "reset" }
 type RenderTui = { requestRender(): void }
 
 type ScopedConfigChangeHandler<Config extends object> = (effective: Config, scoped: ScopedConfig<Config>) => void
@@ -30,6 +29,7 @@ export class ScopedConfigEditor<Config extends object> {
 	private readonly scopes: readonly ConfigScope[]
 	private readonly done: (result: undefined) => void
 	private activeInput: Input | undefined
+	private activeInputDirty = false
 	private focusPart: FocusPart = "value"
 	private currentTab = 0
 	private currentRow = 0
@@ -59,16 +59,16 @@ export class ScopedConfigEditor<Config extends object> {
 		const lines: string[] = []
 		const renderWidth = Math.max(1, width)
 		const scope = this.currentScope()
-		const rows = this.rows(scope)
+		const fields = this.visibleFields(scope)
 
 		lines.push(this.theme.fg("accent", "─".repeat(renderWidth)))
 		this.renderTabs(lines, renderWidth)
 		lines.push("")
 		this.renderScopeHeader(lines, renderWidth)
 		lines.push("")
-		this.renderActiveFieldDescription(lines, renderWidth, rows)
-		this.renderRows(lines, renderWidth, scope, rows)
-		this.renderActiveValueDescription(lines, renderWidth, scope, rows)
+		this.renderActiveFieldDescription(lines, renderWidth, fields)
+		this.renderRows(lines, renderWidth, scope, fields)
+		this.renderActiveValueDescription(lines, renderWidth, scope, fields)
 		lines.push("")
 		addWrappedWithPrefix(
 			lines,
@@ -85,28 +85,28 @@ export class ScopedConfigEditor<Config extends object> {
 
 	handleInput(data: string): void {
 		const kb = getKeybindings()
-		if (kb.matches(data, "tui.select.cancel") || matchesKey(data, Key.ctrl("c"))) {
+		const isSpace = data === " " || matchesKey(data, Key.space) || matchesKey(data, Key.shift("space"))
+		if (matchesKey(data, Key.ctrl("c"))) {
+			this.done(undefined)
+			return
+		}
+		if (this.activeInput && kb.matches(data, "tui.select.cancel")) {
+			this.updateActiveInput()
+			this.tui.requestRender()
+			return
+		}
+		if (kb.matches(data, "tui.select.cancel")) {
 			this.done(undefined)
 			return
 		}
 		if (kb.matches(data, "tui.select.up")) {
-			this.commitStringInput()
+			if (!this.commitActiveInput()) return
 			this.moveRow(-1)
 			return
 		}
 		if (kb.matches(data, "tui.select.down")) {
-			this.commitStringInput()
+			if (!this.commitActiveInput()) return
 			this.moveRow(1)
-			return
-		}
-		if (
-			this.activeInput &&
-			this.focusPart === "value" &&
-			kb.matches(data, "tui.editor.cursorLeft") &&
-			inputCursor(this.activeInput) === 0
-		) {
-			this.focusPart = "include"
-			this.tui.requestRender()
 			return
 		}
 		if (
@@ -114,33 +114,67 @@ export class ScopedConfigEditor<Config extends object> {
 			this.focusPart === "value" &&
 			(kb.matches(data, "tui.editor.cursorLeft") || kb.matches(data, "tui.editor.cursorRight"))
 		) {
-			this.activeInput.handleInput(data)
+			const cursor = inputCursor(this.activeInput)
+			const value = this.activeInput.getValue()
+			const overstepsLeft = kb.matches(data, "tui.editor.cursorLeft") && cursor === 0
+			const overstepsRight = kb.matches(data, "tui.editor.cursorRight") && cursor === value.length
+			if (overstepsLeft || overstepsRight) {
+				if (!this.commitActiveInput()) return
+				this.focusPart = "include"
+			} else {
+				this.activeInput.handleInput(data)
+			}
 			this.tui.requestRender()
 			return
 		}
 		if (matchesKey(data, Key.tab)) {
-			this.commitStringInput()
+			if (!this.commitActiveInput()) return
 			this.switchTab(1)
 			return
 		}
 		if (kb.matches(data, "tui.editor.cursorRight")) {
+			if (!this.selectedFieldIsSet()) return
 			this.focusPart = "value"
 			this.updateActiveInput()
 			this.tui.requestRender()
 			return
 		}
 		if (kb.matches(data, "tui.editor.cursorLeft")) {
-			this.commitStringInput()
+			if (this.focusPart === "include") {
+				if (!this.selectedFieldIsSet()) return
+				this.focusPart = "value"
+				this.updateActiveInput()
+				this.tui.requestRender()
+				return
+			}
+			if (!this.commitActiveInput()) return
 			this.focusPart = "include"
 			this.activeInput = undefined
 			this.tui.requestRender()
 			return
 		}
-		if (this.handleStringInput(data)) return
-		if (kb.matches(data, "tui.input.submit") || data === " ") {
-			this.activateRow()
+		if (isSpace && this.focusPart === "value" && this.activeInput && this.selectedField()?.kind === "string") {
+			this.handleActiveInput(data)
 			return
 		}
+		if (isSpace && this.focusPart === "value" && this.activeInput && this.selectedField()?.kind === "number") {
+			this.stepActiveNumberInput()
+			return
+		}
+		if (kb.matches(data, "tui.input.submit") && this.focusPart === "value" && this.activeInput) {
+			if (this.selectedField()?.kind === "number" && this.activeInputDirty) this.commitActiveInput()
+			else if (this.selectedField()?.kind === "number") this.activateRow("submit")
+			return
+		}
+		if (kb.matches(data, "tui.input.submit")) {
+			this.activateRow("submit")
+			return
+		}
+		if (isSpace) {
+			this.activateRow("space")
+			return
+		}
+		if (this.handleActiveInput(data)) return
 	}
 
 	private renderTabs(lines: string[], width: number): void {
@@ -171,48 +205,45 @@ export class ScopedConfigEditor<Config extends object> {
 		)
 	}
 
-	private renderRows(lines: string[], width: number, scope: ConfigScope, rows: Row[]): void {
-		for (const [index, row] of rows.entries()) {
+	private renderRows(lines: string[], width: number, scope: ConfigScope, fields: readonly ScopedConfigField[]): void {
+		for (const [index, field] of fields.entries()) {
 			const selected = index === this.currentRow
-			if (row.kind === "reset") {
-				this.renderResetRow(lines, width, selected)
-				continue
-			}
-
-			const prefix = this.theme.fg(selected ? "accent" : "muted", `${selected ? "> " : "  "}${"  ".repeat(row.field.depth ?? 0)}`)
-			const isSet = getConfigValue(this.scoped[scope], row.field.key) !== undefined
+			const prefix = this.theme.fg(selected ? "accent" : "muted", `${selected ? "> " : "  "}${"  ".repeat(field.depth ?? 0)}`)
+			const isSet = getConfigValue(this.scoped[scope], field.key) !== undefined
 			const include = `${isSet ? "[x]" : "[ ]"} `
 			const renderedInclude = this.theme.fg(selected && this.focusPart === "include" ? "accent" : "muted", include)
-			const value = this.renderFieldValue(this.scoped[scope], row.field, selected, width)
-			const note = getScopeNote(scope, this.scopes, this.scoped, row.field)
+			const value = this.renderFieldValue(this.scoped[scope], field, selected, width)
+			const note = getScopeNote(scope, this.scopes, this.scoped, field)
 			const renderedNote = note ? ` ${this.theme.fg("muted", `(${note})`)}` : ""
 			const valueStyle = value === "unset" ? "muted" : selected && this.focusPart === "value" ? "accent" : "text"
 			addWrappedWithPrefix(
 				lines,
 				width,
 				prefix,
-				`${renderedInclude}${this.theme.fg("text", row.field.label)}  ${this.theme.fg(valueStyle, value)}${renderedNote}`
+				`${renderedInclude}${this.theme.fg("text", field.label)}  ${this.theme.fg(valueStyle, value)}${renderedNote}`
 			)
 		}
+		this.renderResetRow(lines, width, this.isResetSelected(fields))
 	}
 
-	private renderActiveValueDescription(lines: string[], width: number, scope: ConfigScope, rows: Row[]): void {
-		const row = rows[this.currentRow]
-		const valueDescription = row?.kind === "field" ? getValueDescription(this.scoped[scope], row.field) : undefined
+	private renderActiveValueDescription(lines: string[], width: number, scope: ConfigScope, fields: readonly ScopedConfigField[]): void {
+		const field = this.selectedField(fields)
+		const valueDescription = field ? getValueDescription(this.scoped[scope], field) : undefined
 		lines.push("")
 		if (valueDescription) addWrappedWithPrefix(lines, width, " ", this.theme.fg("muted", valueDescription))
 		else lines.push("")
 	}
 
 	private renderFieldValue(config: Config, field: ScopedConfigField, selected: boolean, width: number): string {
-		if (selected && this.focusPart === "value" && field.kind === "string" && this.activeInput)
-			return renderStringInput(this.activeInput, width)
+		if (selected && this.focusPart === "value" && this.activeInput) {
+			if (field.kind === "string") return renderStringInput(this.activeInput, width)
+			if (field.kind === "number" && !field.values) return renderInput(this.activeInput, width)
+		}
 		return formatScopedValue(config, field)
 	}
 
-	private renderActiveFieldDescription(lines: string[], width: number, rows: Row[]): void {
-		const row = rows[this.currentRow]
-		const description = row?.kind === "field" ? row.field.description : undefined
+	private renderActiveFieldDescription(lines: string[], width: number, fields: readonly ScopedConfigField[]): void {
+		const description = this.selectedField(fields)?.description
 		const wrapped = description ? wrapTextWithAnsi(this.theme.fg("muted", description), Math.max(1, width - 1)).slice(0, 2) : []
 		for (let index = 0; index < 2; index++) lines.push(wrapped[index] ? ` ${wrapped[index]}` : "")
 	}
@@ -241,10 +272,26 @@ export class ScopedConfigEditor<Config extends object> {
 		return config
 	}
 
-	private rows(scope: ConfigScope = this.currentScope()): Row[] {
+	private visibleFields(scope: ConfigScope = this.currentScope()): ScopedConfigField[] {
 		const effective = this.resolvedConfig(scope)
-		const fields = this.fields.filter(field => isFieldVisible(field, scope, this.scoped, effective))
-		return [...fields.map(field => ({ kind: "field" as const, field })), { kind: "reset" }]
+		return this.fields.filter(field => isFieldVisible(field, scope, this.scoped, effective))
+	}
+
+	private selectedField(fields: readonly ScopedConfigField[] = this.visibleFields()): ScopedConfigField | undefined {
+		return fields[this.currentRow]
+	}
+
+	private isResetSelected(fields: readonly ScopedConfigField[] = this.visibleFields()): boolean {
+		return this.currentRow === fields.length
+	}
+
+	private selectedFieldIsSet(): boolean {
+		const field = this.selectedField()
+		return !!field && getConfigValue(this.scoped[this.currentScope()], field.key) !== undefined
+	}
+
+	private rowCount(): number {
+		return this.visibleFields().length + 1
 	}
 
 	private scopeIsUnset(scope: ConfigScope): boolean {
@@ -252,16 +299,15 @@ export class ScopedConfigEditor<Config extends object> {
 	}
 
 	private refresh(): void {
-		this.currentRow = Math.min(this.currentRow, this.rows().length - 1)
+		this.currentRow = Math.min(this.currentRow, this.rowCount() - 1)
 		this.updateFocus()
 		this.updateActiveInput()
 		this.tui.requestRender()
 	}
 
 	private updateFocus(): void {
-		const row = this.rows()[this.currentRow]
-		this.focusPart =
-			row?.kind === "field" && getConfigValue(this.scoped[this.currentScope()], row.field.key) === undefined ? "include" : "value"
+		const field = this.selectedField()
+		this.focusPart = field && getConfigValue(this.scoped[this.currentScope()], field.key) === undefined ? "include" : "value"
 	}
 
 	private switchTab(delta: number): void {
@@ -270,76 +316,92 @@ export class ScopedConfigEditor<Config extends object> {
 	}
 
 	private moveRow(delta: number): void {
-		const rowCount = this.rows().length
+		const rowCount = this.rowCount()
 		this.currentRow = (this.currentRow + delta + rowCount) % rowCount
 		this.refresh()
 	}
 
-	private activateRow(): void {
+	private activateRow(_action: "submit" | "space"): void {
 		const scope = this.currentScope()
-		const row = this.rows(scope)[this.currentRow]
-		if (!row) return
-		if (row.kind === "reset") this.reset(scope)
-		else if (this.focusPart === "include") this.toggleField(scope, row.field)
-		else if (getConfigValue(this.scoped[scope], row.field.key) === undefined)
-			this.save(scope, setConfigValue(this.scoped[scope], row.field.key, row.field.default))
-		else if (row.field.kind === "string") this.startStringInput(row.field)
-		else this.save(scope, cycleField(this.scoped[scope], row.field))
+		const fields = this.visibleFields(scope)
+		const field = this.selectedField(fields)
+		if (!field) {
+			if (this.isResetSelected(fields)) this.reset(scope)
+			return
+		}
+		if (this.focusPart === "include") this.toggleField(scope, field)
+		else if (getConfigValue(this.scoped[scope], field.key) === undefined)
+			this.save(scope, setConfigValue(this.scoped[scope], field.key, field.default))
+		else if (field.kind === "number") this.save(scope, cycleField(this.scoped[scope], field))
+		else if (fieldUsesInput(field)) this.startInput(field)
+		else this.save(scope, cycleField(this.scoped[scope], field))
 	}
 
 	private toggleField(scope: ConfigScope, field: ScopedConfigField): void {
 		const current = getConfigValue(this.scoped[scope], field.key)
-		this.save(scope, setConfigValue(this.scoped[scope], field.key, current === undefined ? field.default : undefined))
-	}
-
-	private updateActiveInput(): void {
-		const row = this.rows()[this.currentRow]
-		if (this.focusPart !== "value" || row?.kind !== "field" || row.field.kind !== "string") {
-			this.activeInput = undefined
-			return
-		}
-
-		const value = getConfigValue(this.scoped[this.currentScope()], row.field.key)
-		if (typeof value !== "string") {
-			this.activeInput = undefined
-			return
-		}
-
-		this.startStringInput(row.field, value)
-	}
-
-	private startStringInput(field: ScopedConfigField, initial?: string): void {
-		if (field.kind !== "string") return
-		const value = initial ?? getConfigValue(this.scoped[this.currentScope()], field.key)
-		const input = new Input()
-		input.setValue(typeof value === "string" ? value : "")
-		setInputCursor(input, 0)
-		input.focused = true
-		this.activeInput = input
+		const nextIsSet = current === undefined
+		this.activeInput = undefined
+		this.activeInputDirty = false
+		this.save(scope, setConfigValue(this.scoped[scope], field.key, nextIsSet ? field.default : undefined))
+		this.focusPart = nextIsSet ? "value" : "include"
+		this.updateActiveInput()
 		this.tui.requestRender()
 	}
 
-	private handleStringInput(data: string): boolean {
-		const row = this.rows()[this.currentRow]
-		if (this.focusPart !== "value" || row?.kind !== "field" || row.field.kind !== "string") return false
+	private updateActiveInput(): void {
+		const field = this.selectedField()
+		if (this.focusPart !== "value" || !field || !fieldUsesInput(field)) {
+			this.activeInput = undefined
+			this.activeInputDirty = false
+			return
+		}
+
+		const value = getConfigValue(this.scoped[this.currentScope()], field.key)
+		if ((field.kind === "string" && typeof value !== "string") || (field.kind === "number" && typeof value !== "number")) {
+			this.activeInput = undefined
+			this.activeInputDirty = false
+			return
+		}
+
+		this.startInput(field, String(value))
+	}
+
+	private startInput(field: ScopedConfigField, initial?: string): void {
+		if (!fieldUsesInput(field)) return
+		const value = initial ?? getConfigValue(this.scoped[this.currentScope()], field.key)
+		const input = new Input()
+		input.setValue(typeof value === "string" || typeof value === "number" ? String(value) : "")
+		setInputCursor(input, 0)
+		input.focused = true
+		this.activeInput = input
+		this.activeInputDirty = false
+		this.tui.requestRender()
+	}
+
+	private handleActiveInput(data: string): boolean {
+		const field = this.selectedField()
+		if (this.focusPart !== "value" || !field || !fieldUsesInput(field)) return false
 
 		const kb = getKeybindings()
 		if (kb.matches(data, "tui.input.submit")) {
-			if (!this.activeInput) this.startStringInput(row.field)
-			else this.commitStringInput()
+			if (this.activeInput) this.commitActiveInput()
 			return true
 		}
 
 		if (this.activeInput) {
+			if (field.kind === "number" && !isNumberInput(data, this.activeInput) && !isNumberInputControl(data)) return true
 			this.activeInput.handleInput(data)
+			this.activeInputDirty = true
 			this.tui.requestRender()
 			return true
 		}
 
 		if (data.length === 1 && !matchesKey(data, Key.escape)) {
-			this.startStringInput(row.field)
+			if (field.kind === "number" && !isNumberInput(data)) return true
+			this.startInput(field)
 			const input = this.activeInput as Input | undefined
 			if (input) input.handleInput(data)
+			this.activeInputDirty = true
 			this.tui.requestRender()
 			return true
 		}
@@ -347,12 +409,62 @@ export class ScopedConfigEditor<Config extends object> {
 		return false
 	}
 
-	private commitStringInput(): void {
-		const row = this.rows()[this.currentRow]
-		if (row?.kind !== "field" || row.field.kind !== "string" || !this.activeInput) return
+	private commitActiveInput(): boolean {
+		const field = this.selectedField()
+		if (!field || !fieldUsesInput(field) || !this.activeInput) return true
 		const value = this.activeInput.getValue()
+		if (field.kind === "number") {
+			const trimmed = value.trim()
+			if (trimmed === "" || trimmed === "-" || trimmed === "." || trimmed === "-.") {
+				this.ctx.ui.notify(`${field.label} must be a number`, "error")
+				return false
+			}
+			const parsed = Number(trimmed)
+			if (!Number.isFinite(parsed)) {
+				this.ctx.ui.notify(`${field.label} must be a number`, "error")
+				return false
+			}
+			if (field.min !== undefined && parsed < field.min) {
+				this.ctx.ui.notify(`${field.label} must be at least ${field.min}`, "error")
+				return false
+			}
+			if (field.max !== undefined && parsed > field.max) {
+				this.ctx.ui.notify(`${field.label} must be at most ${field.max}`, "error")
+				return false
+			}
+			this.activeInput = undefined
+			this.activeInputDirty = false
+			this.save(this.currentScope(), setConfigValue(this.scoped[this.currentScope()], field.key, parsed))
+			return true
+		}
+
 		this.activeInput = undefined
-		this.save(this.currentScope(), setConfigValue(this.scoped[this.currentScope()], row.field.key, value))
+		this.activeInputDirty = false
+		this.save(this.currentScope(), setConfigValue(this.scoped[this.currentScope()], field.key, value))
+		return true
+	}
+
+	private stepActiveNumberInput(): void {
+		const field = this.selectedField()
+		if (field?.kind !== "number" || !this.activeInput) return
+
+		const trimmed = this.activeInput.getValue().trim()
+		if (trimmed === "" || trimmed === "-" || trimmed === "." || trimmed === "-.") {
+			this.ctx.ui.notify(`${field.label} must be a number`, "error")
+			return
+		}
+		const parsed = Number(trimmed)
+		if (!Number.isFinite(parsed)) {
+			this.ctx.ui.notify(`${field.label} must be a number`, "error")
+			return
+		}
+
+		const step = field.step ?? 1
+		const base =
+			field.min !== undefined && parsed < field.min ? field.min - step : field.max !== undefined && parsed > field.max ? field.max : parsed
+		this.activeInput = undefined
+		this.activeInputDirty = false
+		this.save(this.currentScope(), setConfigValue(this.scoped[this.currentScope()], field.key, nextNumberValue(field, base)))
 	}
 
 	private save(scope: ConfigScope, nextConfig: Config): void {
@@ -403,6 +515,15 @@ function setConfigValue<Config extends object>(config: Config, key: string, valu
 	return next as Config
 }
 
+function fieldUsesInput(field: ScopedConfigField): boolean {
+	return field.kind === "string" || (field.kind === "number" && !field.values)
+}
+
+function renderInput(input: Input, width: number, trimPadding = true): string {
+	const rendered = input.render(width + 2)[0]?.slice(2) ?? ""
+	return trimPadding ? rendered.trimEnd() : rendered
+}
+
 function inputCursor(input: Input): number {
 	return (input as unknown as { cursor: number }).cursor
 }
@@ -420,15 +541,45 @@ function renderStringInput(input: Input, width: number): string {
 	return truncateToWidth(`${beforeCursor}${CURSOR_MARKER}\x1b[7m${atCursor}\x1b[27m${afterCursor}`, width, "")
 }
 
+function isNumberInput(data: string, input?: Input): boolean {
+	if (/^[0-9]$/.test(data)) return true
+	if (data === "-") {
+		if (!input) return true
+		return inputCursor(input) === 0 && !input.getValue().includes("-")
+	}
+	if (data !== ".") return false
+	return !input?.getValue().includes(".")
+}
+
+function isNumberInputControl(data: string): boolean {
+	const kb = getKeybindings()
+	return kb.matches(data, "tui.editor.deleteCharBackward") || kb.matches(data, "tui.editor.deleteCharForward")
+}
+
 function cycleField<Config extends object>(config: Config, field: ScopedConfigField): Config {
 	const current = formatScopedValue(config, field)
+	if (field.kind === "number") return setConfigValue(config, field.key, nextNumberValue(field, getConfigValue(config, field.key)))
 	const options = field.kind === "enum" ? field.values : ["on", "off"]
 	const next = nextOption(options, current)
 	const persisted = field.kind === "boolean" ? next === "on" : next
 	return setConfigValue(config, field.key, persisted)
 }
 
-function nextOption<T extends string>(options: readonly T[], value: T): T {
+function nextNumberValue(field: Extract<ScopedConfigField, { kind: "number" }>, value: unknown): number {
+	if (field.values) return nextOption(field.values, typeof value === "number" ? value : field.default)
+	const step = field.step ?? 1
+	const current = typeof value === "number" ? value : field.default
+	const next = roundToStepPrecision(current + step, step)
+	if (field.max !== undefined && next > field.max) return field.min ?? field.default
+	return next
+}
+
+function roundToStepPrecision(value: number, step: number): number {
+	const decimalPlaces = step.toString().split(".")[1]?.length ?? 0
+	return Number(value.toFixed(decimalPlaces))
+}
+
+function nextOption<T>(options: readonly T[], value: T): T {
 	const index = options.indexOf(value)
 	return options[(index + 1) % options.length] ?? options[0] ?? value
 }
@@ -441,19 +592,23 @@ function formatScopedValue(config: object, field: ScopedConfigField): string {
 function getValueDescription(config: object, field: ScopedConfigField): string | undefined {
 	const value = formatScopedValue(config, field)
 	if (value === "unset") return undefined
-	const description =
-		field.kind === "enum"
-			? field.valueDescriptions?.[value]
-			: field.kind === "boolean"
-				? field.valueDescriptions?.[value as "on" | "off"]
-				: undefined
-	return description
+
+	switch (field.kind) {
+		case "enum":
+		case "number":
+			return field.valueDescriptions?.[value]
+		case "boolean":
+			return field.valueDescriptions?.[value as "on" | "off"]
+		case "string":
+			return undefined
+	}
 }
 
 function formatFieldValue(field: ScopedConfigField, value: unknown): string {
 	if (value === undefined) return "unset"
 	if (field.kind === "boolean") return value ? "on" : "off"
 	if (field.kind === "string") return JSON.stringify(String(value))
+	if (field.kind === "number") return String(value)
 	return String(value)
 }
 

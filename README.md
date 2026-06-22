@@ -47,6 +47,9 @@ scopes override earlier scopes.
 Fields support optional `description` and `valueDescriptions`; `ScopedConfigEditor`
 renders the active field and set value descriptions under the field list.
 String fields are edited inline; use the include toggle to unset a value.
+Number fields support `min`, `max`, `step`, or explicit `values`. `step` controls
+UI stepping only. Number fields with `values` cycle through those values; other
+number fields can be edited inline.
 
 ## Related projects
 

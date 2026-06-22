@@ -9,6 +9,7 @@ export type ScopedConfig<Config extends object> = Record<ConfigScope, Config>
 export type ConfigScopes = readonly [ConfigScope, ...ConfigScope[]]
 
 type EnumValues = readonly [string, ...string[]]
+type NumberValues = readonly [number, ...number[]]
 
 export type VisibilityContext = {
 	get(key: string): unknown
@@ -20,7 +21,7 @@ type BaseField = {
 	key: string
 	label: string
 	description?: string
-	kind: "enum" | "boolean" | "string"
+	kind: "enum" | "boolean" | "string" | "number"
 	depth?: number
 	visibleWhen?: (ctx: VisibilityContext) => boolean
 }
@@ -43,7 +44,17 @@ export type StringConfigField = BaseField & {
 	default: string
 }
 
-export type ScopedConfigField = EnumConfigField | BooleanConfigField | StringConfigField
+export type NumberConfigField = BaseField & {
+	kind: "number"
+	default: number
+	min?: number
+	max?: number
+	step?: number
+	values?: NumberValues
+	valueDescriptions?: Record<string, string>
+}
+
+export type ScopedConfigField = EnumConfigField | BooleanConfigField | StringConfigField | NumberConfigField
 export type ConfigFromFields<Fields extends readonly ScopedConfigField[]> = {
 	[Field in Fields[number] as Field["key"]]?: FieldValue<Field>
 }
@@ -55,7 +66,11 @@ type FieldValue<Field> = Field extends { kind: "enum"; values: infer Values exte
 		? boolean
 		: Field extends { kind: "string" }
 			? string
-			: never
+			: Field extends { kind: "number"; values: infer Values extends readonly number[] }
+				? Values[number]
+				: Field extends { kind: "number" }
+					? number
+					: never
 type ValidateEnumDefaults<Fields extends readonly ScopedConfigField[]> = {
 	[Index in keyof Fields]: Fields[Index] extends {
 		kind: "enum"
@@ -65,6 +80,17 @@ type ValidateEnumDefaults<Fields extends readonly ScopedConfigField[]> = {
 		? Default extends Values[number]
 			? unknown
 			: { enumDefaultMustBeOneOf: Values[number] }
+		: unknown
+}
+type ValidateNumberDefaults<Fields extends readonly ScopedConfigField[]> = {
+	[Index in keyof Fields]: Fields[Index] extends {
+		kind: "number"
+		values: infer Values extends readonly number[]
+		default: infer Default extends number
+	}
+		? Default extends Values[number]
+			? unknown
+			: { numberDefaultMustBeOneOf: Values[number] }
 		: unknown
 }
 
@@ -121,7 +147,7 @@ export function createScopedConfigSchema(fields: readonly ScopedConfigField[]): 
 export function defineScopedConfigSpec<const Fields extends readonly ScopedConfigField[]>(options: {
 	fileName: string
 	scopes?: ConfigScopes
-	fields: Fields & ValidateEnumDefaults<Fields>
+	fields: Fields & ValidateEnumDefaults<Fields> & ValidateNumberDefaults<Fields>
 }): ScopedConfigSpec<ConfigFromFields<Fields>> & {
 	fields: Fields
 	schema: TObject
@@ -218,6 +244,21 @@ function validateFields(fields: readonly ScopedConfigField[]): void {
 			throw new Error(`Enum field ${field.key} default must be one of: ${field.values.join(", ")}`)
 		}
 	}
+	for (const field of fields) {
+		if (field.kind !== "number") continue
+		if (field.step !== undefined && (!Number.isFinite(field.step) || field.step <= 0)) {
+			throw new Error(`Number field ${field.key} step must be a positive finite number`)
+		}
+		if (field.min !== undefined && field.max !== undefined && field.min > field.max) {
+			throw new Error(`Number field ${field.key} min must be less than or equal to max`)
+		}
+		if (field.values) {
+			if (field.values.length === 0) throw new Error(`Number field ${field.key} values must have at least one value`)
+			if (!field.values.includes(field.default)) {
+				throw new Error(`Number field ${field.key} default must be one of: ${field.values.join(", ")}`)
+			}
+		}
+	}
 }
 
 function createFieldSchema(field: ScopedConfigField): TSchema {
@@ -229,6 +270,15 @@ function createFieldSchema(field: ScopedConfigField): TSchema {
 			return Type.Boolean({ default: field.default })
 		case "string":
 			return Type.String({ default: field.default })
+		case "number":
+			if (field.values) {
+				return Type.Union(field.values.map(value => Type.Literal(value)) as unknown as [TSchema, ...TSchema[]], { default: field.default })
+			}
+			return Type.Number({
+				default: field.default,
+				...(field.min === undefined ? {} : { minimum: field.min }),
+				...(field.max === undefined ? {} : { maximum: field.max })
+			})
 	}
 }
 
