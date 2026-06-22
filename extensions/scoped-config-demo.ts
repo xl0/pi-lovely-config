@@ -16,11 +16,12 @@ const demoFields = [
 		label: "Theme",
 		description: "Cycles an enum value. Workspace overrides user when both scopes are active",
 		kind: "enum",
-		values: ["system", "light", "dark"],
+		values: ["system", "light", "dark", "unset"],
 		valueDescriptions: {
 			system: "Follow Pi's current theme",
 			light: "Prefer a light presentation",
-			dark: "Prefer a dark presentation"
+			dark: "Prefer a dark presentation",
+			unset: "Literal enum value named unset"
 		},
 		default: "system"
 	},

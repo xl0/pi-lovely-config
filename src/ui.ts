@@ -13,9 +13,11 @@ import type { ConfigPatch, ConfigScope, ResolvedConfig, ScopedConfigField, Scope
 import { getConfigValue } from "./config"
 
 type RenderTui = { requestRender(): void }
+type Keybindings = ReturnType<typeof getKeybindings>
 
 type ScopedConfigChangeHandler<Config extends object> = (resolved: ResolvedConfig<Config>, scoped: ScopedConfigPatch<Config>) => void
 type FocusPart = "include" | "value"
+type NumberInputParseResult = { ok: true; value: number } | { ok: false; message: string }
 
 export class ScopedConfigEditor<Config extends object> {
 	private scoped: ScopedConfigPatch<Config>
@@ -74,7 +76,7 @@ export class ScopedConfigEditor<Config extends object> {
 			lines,
 			renderWidth,
 			" ",
-			this.theme.fg("dim", "Tab switch scope • ↑↓ select • ←→ include/value • Enter/Space edit/toggle • Esc reset/close")
+			this.theme.fg("dim", "Tab switch scope • ↑↓ select • ←→ include/value • Enter/Space edit/toggle • Esc close")
 		)
 		lines.push(this.theme.fg("accent", "─".repeat(renderWidth)))
 
@@ -86,100 +88,119 @@ export class ScopedConfigEditor<Config extends object> {
 	handleInput(data: string): void {
 		const kb = getKeybindings()
 		const isSpace = data === " " || matchesKey(data, Key.space) || matchesKey(data, Key.shift("space"))
+		if (this.handleCloseKey(data, kb)) return
+		if (this.handleActiveInputCursorKey(data, kb)) return
+		if (this.handleNavigationKey(data, kb)) return
+		if (this.handleActivationKey(data, kb, isSpace)) return
+		if (this.handleActiveInput(data, kb)) return
+	}
+
+	private handleCloseKey(data: string, kb: Keybindings): boolean {
 		if (matchesKey(data, Key.ctrl("c"))) {
 			this.done(undefined)
-			return
+			return true
 		}
 		if (this.activeInput && kb.matches(data, "tui.select.cancel")) {
 			if (this.activeInputMatchesPersisted()) {
 				this.done(undefined)
-				return
+				return true
 			}
 			this.updateActiveInput()
 			this.tui.requestRender()
-			return
+			return true
 		}
 		if (kb.matches(data, "tui.select.cancel")) {
 			this.done(undefined)
-			return
+			return true
 		}
+		return false
+	}
+
+	private handleNavigationKey(data: string, kb: Keybindings): boolean {
 		if (kb.matches(data, "tui.select.up")) {
-			if (!this.commitActiveInput()) return
+			if (!this.commitActiveInput()) return true
 			this.moveRow(-1)
-			return
+			return true
 		}
 		if (kb.matches(data, "tui.select.down")) {
-			if (!this.commitActiveInput()) return
+			if (!this.commitActiveInput()) return true
 			this.moveRow(1)
-			return
-		}
-		if (
-			this.activeInput &&
-			this.focusPart === "value" &&
-			(kb.matches(data, "tui.editor.cursorLeft") || kb.matches(data, "tui.editor.cursorRight"))
-		) {
-			const cursor = inputCursor(this.activeInput)
-			const value = this.activeInput.getValue()
-			const overstepsLeft = kb.matches(data, "tui.editor.cursorLeft") && cursor === 0
-			const overstepsRight = kb.matches(data, "tui.editor.cursorRight") && cursor === value.length
-			if (overstepsLeft || overstepsRight) {
-				if (!this.commitActiveInput()) return
-				this.focusPart = "include"
-			} else {
-				this.activeInput.handleInput(data)
-			}
-			this.tui.requestRender()
-			return
+			return true
 		}
 		if (matchesKey(data, Key.tab)) {
-			if (!this.commitActiveInput()) return
+			if (!this.commitActiveInput()) return true
 			this.switchTab(1)
-			return
+			return true
 		}
 		if (kb.matches(data, "tui.editor.cursorRight")) {
-			if (!this.selectedFieldIsSet()) return
+			if (!this.selectedFieldIsSet()) return true
 			this.focusPart = "value"
 			this.updateActiveInput()
 			this.tui.requestRender()
-			return
+			return true
 		}
-		if (kb.matches(data, "tui.editor.cursorLeft")) {
-			if (this.focusPart === "include") {
-				if (!this.selectedFieldIsSet()) return
-				this.focusPart = "value"
-				this.updateActiveInput()
-				this.tui.requestRender()
-				return
-			}
-			if (!this.commitActiveInput()) return
-			this.focusPart = "include"
-			this.activeInput = undefined
+		if (!kb.matches(data, "tui.editor.cursorLeft")) return false
+		if (this.focusPart === "include") {
+			if (!this.selectedFieldIsSet()) return true
+			this.focusPart = "value"
+			this.updateActiveInput()
 			this.tui.requestRender()
-			return
+			return true
 		}
+		if (!this.commitActiveInput()) return true
+		this.focusPart = "include"
+		this.activeInput = undefined
+		this.tui.requestRender()
+		return true
+	}
+
+	private handleActiveInputCursorKey(data: string, kb: Keybindings): boolean {
+		if (
+			!this.activeInput ||
+			this.focusPart !== "value" ||
+			(!kb.matches(data, "tui.editor.cursorLeft") && !kb.matches(data, "tui.editor.cursorRight"))
+		) {
+			return false
+		}
+
+		const cursor = inputCursor(this.activeInput)
+		const value = this.activeInput.getValue()
+		const overstepsLeft = kb.matches(data, "tui.editor.cursorLeft") && cursor === 0
+		const overstepsRight = kb.matches(data, "tui.editor.cursorRight") && cursor === value.length
+		if (overstepsLeft || overstepsRight) {
+			if (!this.commitActiveInput()) return true
+			this.focusPart = "include"
+		} else {
+			this.activeInput.handleInput(data)
+		}
+		this.tui.requestRender()
+		return true
+	}
+
+	private handleActivationKey(data: string, kb: Keybindings, isSpace: boolean): boolean {
 		if (isSpace && this.focusPart === "value" && this.activeInput && this.selectedField()?.kind === "string") {
-			this.handleActiveInput(data)
-			return
+			this.handleActiveInput(data, kb)
+			return true
 		}
 		if (isSpace && this.focusPart === "value" && this.activeInput && this.selectedField()?.kind === "number") {
 			this.stepActiveNumberInput()
-			return
+			return true
 		}
 		if (kb.matches(data, "tui.input.submit") && this.focusPart === "value" && this.activeInput) {
 			if (this.selectedField()?.kind === "number" && this.activeInputDirty) this.commitActiveInput()
 			else if (this.selectedField()?.kind === "number") this.activateRow()
 			else this.commitActiveInput()
-			return
+			return true
 		}
 		if (kb.matches(data, "tui.input.submit")) {
 			this.activateRow()
-			return
+			return true
 		}
 		if (isSpace) {
 			this.activateRow()
-			return
+			return true
 		}
-		if (this.handleActiveInput(data)) return
+		return false
 	}
 
 	private renderTabs(lines: string[], width: number): void {
@@ -213,13 +234,14 @@ export class ScopedConfigEditor<Config extends object> {
 		for (const [index, field] of fields.entries()) {
 			const selected = index === this.currentRow
 			const prefix = this.theme.fg(selected ? "accent" : "muted", `${selected ? "> " : "  "}${"  ".repeat(field.depth ?? 0)}`)
-			const isSet = getConfigValue(this.scoped[scope], field.key) !== undefined
+			const rawValue = getConfigValue(this.scoped[scope], field.key)
+			const isSet = rawValue !== undefined
 			const include = `${isSet ? "[x]" : "[ ]"} `
 			const renderedInclude = this.theme.fg(selected && this.focusPart === "include" ? "accent" : "muted", include)
 			const value = this.renderFieldValue(this.scoped[scope], field, selected, width)
 			const note = getScopeNote(scope, this.scopes, this.scoped, field)
 			const renderedNote = note ? ` ${this.theme.fg("muted", `(${note})`)}` : ""
-			const valueStyle = value === "unset" ? "muted" : selected && this.focusPart === "value" ? "accent" : "text"
+			const valueStyle = !isSet ? "muted" : selected && this.focusPart === "value" ? "accent" : "text"
 			addWrappedWithPrefix(
 				lines,
 				width,
@@ -259,7 +281,7 @@ export class ScopedConfigEditor<Config extends object> {
 			lines,
 			width,
 			prefix,
-			`${this.theme.fg("text", "Reset to default")}  ${this.theme.fg("muted", "delete this scope config file")}`
+			`${this.theme.fg("text", `Reset ${scopeLabel(this.currentScope())} to default`)}  ${this.theme.fg("muted", "delete this scope config file")}`
 		)
 	}
 
@@ -347,9 +369,6 @@ export class ScopedConfigEditor<Config extends object> {
 		this.activeInput = undefined
 		this.activeInputDirty = false
 		this.save(scope, setConfigValue(this.scoped[scope], field.key, nextIsSet ? field.default : undefined))
-		this.focusPart = nextIsSet ? "value" : "include"
-		this.updateActiveInput()
-		this.tui.requestRender()
 	}
 
 	private updateActiveInput(): void {
@@ -379,10 +398,8 @@ export class ScopedConfigEditor<Config extends object> {
 		if (field.kind === "string") return typeof persisted === "string" && inputValue === persisted
 		if (field.kind !== "number" || typeof persisted !== "number") return false
 
-		const trimmed = inputValue.trim()
-		if (trimmed === "" || trimmed === "-" || trimmed === "." || trimmed === "-.") return false
-		const parsed = Number(trimmed)
-		return Number.isFinite(parsed) && parsed === persisted
+		const parsed = parseNumberInput(field, inputValue, { validateRange: false })
+		return parsed.ok && parsed.value === persisted
 	}
 
 	private startInput(field: ScopedConfigField, initial?: string): void {
@@ -397,18 +414,17 @@ export class ScopedConfigEditor<Config extends object> {
 		this.tui.requestRender()
 	}
 
-	private handleActiveInput(data: string): boolean {
+	private handleActiveInput(data: string, kb: Keybindings): boolean {
 		const field = this.selectedField()
 		if (this.focusPart !== "value" || !field || !fieldUsesInput(field)) return false
 
-		const kb = getKeybindings()
 		if (kb.matches(data, "tui.input.submit")) {
 			if (this.activeInput) this.commitActiveInput()
 			return true
 		}
 
 		if (this.activeInput) {
-			if (field.kind === "number" && !isNumberInput(data, this.activeInput) && !isNumberInputControl(data)) return true
+			if (field.kind === "number" && !isNumberInput(data, this.activeInput) && !isNumberInputControl(data, kb)) return true
 			this.activeInput.handleInput(data)
 			this.activeInputDirty = true
 			this.tui.requestRender()
@@ -433,27 +449,14 @@ export class ScopedConfigEditor<Config extends object> {
 		if (!field || !fieldUsesInput(field) || !this.activeInput) return true
 		const value = this.activeInput.getValue()
 		if (field.kind === "number") {
-			const trimmed = value.trim()
-			if (trimmed === "" || trimmed === "-" || trimmed === "." || trimmed === "-.") {
-				this.ctx.ui.notify(`${field.label} must be a number`, "error")
-				return false
-			}
-			const parsed = Number(trimmed)
-			if (!Number.isFinite(parsed)) {
-				this.ctx.ui.notify(`${field.label} must be a number`, "error")
-				return false
-			}
-			if (field.min !== undefined && parsed < field.min) {
-				this.ctx.ui.notify(`${field.label} must be at least ${field.min}`, "error")
-				return false
-			}
-			if (field.max !== undefined && parsed > field.max) {
-				this.ctx.ui.notify(`${field.label} must be at most ${field.max}`, "error")
+			const parsed = parseNumberInput(field, value)
+			if (!parsed.ok) {
+				this.ctx.ui.notify(parsed.message, "error")
 				return false
 			}
 			this.activeInput = undefined
 			this.activeInputDirty = false
-			this.save(this.currentScope(), setConfigValue(this.scoped[this.currentScope()], field.key, parsed))
+			this.save(this.currentScope(), setConfigValue(this.scoped[this.currentScope()], field.key, parsed.value))
 			return true
 		}
 
@@ -467,20 +470,19 @@ export class ScopedConfigEditor<Config extends object> {
 		const field = this.selectedField()
 		if (field?.kind !== "number" || !this.activeInput) return
 
-		const trimmed = this.activeInput.getValue().trim()
-		if (trimmed === "" || trimmed === "-" || trimmed === "." || trimmed === "-.") {
-			this.ctx.ui.notify(`${field.label} must be a number`, "error")
-			return
-		}
-		const parsed = Number(trimmed)
-		if (!Number.isFinite(parsed)) {
-			this.ctx.ui.notify(`${field.label} must be a number`, "error")
+		const parsed = parseNumberInput(field, this.activeInput.getValue(), { validateRange: false })
+		if (!parsed.ok) {
+			this.ctx.ui.notify(parsed.message, "error")
 			return
 		}
 
 		const step = field.step ?? 1
 		const base =
-			field.min !== undefined && parsed < field.min ? field.min - step : field.max !== undefined && parsed > field.max ? field.max : parsed
+			field.min !== undefined && parsed.value < field.min
+				? field.min - step
+				: field.max !== undefined && parsed.value > field.max
+					? field.max
+					: parsed.value
 		this.activeInput = undefined
 		this.activeInputDirty = false
 		this.save(this.currentScope(), setConfigValue(this.scoped[this.currentScope()], field.key, nextNumberValue(field, base)))
@@ -567,9 +569,25 @@ function isNumberInput(data: string, input?: Input): boolean {
 	return !input?.getValue().includes(".")
 }
 
-function isNumberInputControl(data: string): boolean {
-	const kb = getKeybindings()
+function isNumberInputControl(data: string, kb: Keybindings): boolean {
 	return kb.matches(data, "tui.editor.deleteCharBackward") || kb.matches(data, "tui.editor.deleteCharForward")
+}
+
+function parseNumberInput(
+	field: Extract<ScopedConfigField, { kind: "number" }>,
+	value: string,
+	options: { validateRange?: boolean } = {}
+): NumberInputParseResult {
+	const trimmed = value.trim()
+	if (trimmed === "" || trimmed === "-" || trimmed === "." || trimmed === "-.")
+		return { ok: false, message: `${field.label} must be a number` }
+
+	const parsed = Number(trimmed)
+	if (!Number.isFinite(parsed)) return { ok: false, message: `${field.label} must be a number` }
+	if (options.validateRange === false) return { ok: true, value: parsed }
+	if (field.min !== undefined && parsed < field.min) return { ok: false, message: `${field.label} must be at least ${field.min}` }
+	if (field.max !== undefined && parsed > field.max) return { ok: false, message: `${field.label} must be at most ${field.max}` }
+	return { ok: true, value: parsed }
 }
 
 function cycleField<Config extends object>(config: ConfigPatch<Config>, field: ScopedConfigField): ConfigPatch<Config> {
@@ -606,8 +624,9 @@ function formatScopedValue(config: object, field: ScopedConfigField): string {
 }
 
 function getValueDescription(config: object, field: ScopedConfigField): string | undefined {
-	const value = formatScopedValue(config, field)
-	if (value === "unset") return undefined
+	const rawValue = getConfigValue(config, field.key)
+	if (rawValue === undefined) return undefined
+	const value = formatFieldValue(field, rawValue)
 
 	switch (field.kind) {
 		case "enum":
