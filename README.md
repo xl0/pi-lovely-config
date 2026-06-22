@@ -42,3 +42,6 @@ defineScopedConfigSpec({
 ```
 
 Default is `["user", "workspace"]`. Merge order follows `scopes`, so later
+scopes override earlier scopes.
+
+Fields support optional `description` and `valueDescriptions`; `ScopedConfigEditor`

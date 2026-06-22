@@ -19,6 +19,7 @@ export type VisibilityContext = {
 type BaseField = {
 	key: string
 	label: string
+	description?: string
 	kind: "enum" | "boolean"
 	depth?: number
 	visibleWhen?: (ctx: VisibilityContext) => boolean
@@ -27,11 +28,13 @@ type BaseField = {
 export type EnumConfigField = BaseField & {
 	kind: "enum"
 	values: EnumValues
+	valueDescriptions?: Record<string, string>
 	default: string
 }
 
 export type BooleanConfigField = BaseField & {
 	kind: "boolean"
+	valueDescriptions?: Partial<Record<"on" | "off", string>>
 	default: boolean
 }
 
