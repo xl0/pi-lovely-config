@@ -183,7 +183,7 @@ export class ScopedConfigEditor<Config extends object> {
 	}
 
 	private renderTabs(lines: string[], width: number): void {
-		const tabs = ["← "]
+		const tabs = []
 		for (const [index, scope] of this.scopes.entries()) {
 			const isUnset = this.scopeIsUnset(scope)
 			const text = ` ${isUnset ? "□" : "■"} ${scopeLabel(scope)} `
@@ -193,7 +193,6 @@ export class ScopedConfigEditor<Config extends object> {
 					: this.theme.fg(isUnset ? "muted" : "success", text)
 			tabs.push(`${styled} `)
 		}
-		tabs.push("→")
 		addWrappedWithPrefix(lines, width, " ", tabs.join(""))
 	}
 
@@ -489,7 +488,9 @@ export class ScopedConfigEditor<Config extends object> {
 
 	private save(scope: ConfigScope, nextConfig: Config): void {
 		this.scoped = { ...this.scoped, [scope]: nextConfig }
-		this.spec.writeFile(this.spec.getPath(scope, this.ctx.cwd), nextConfig)
+		const path = this.spec.getPath(scope, this.ctx.cwd)
+		if (Object.keys(nextConfig).length === 0) this.spec.deleteFile(path)
+		else this.spec.writeFile(path, nextConfig)
 		this.onChange(this.spec.merge(this.scoped), this.scoped)
 		this.refresh()
 	}
