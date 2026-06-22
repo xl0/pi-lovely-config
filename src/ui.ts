@@ -609,8 +609,7 @@ function isNumberInputAllowed(data: string, input: Input | undefined, kb: Keybin
 
 function parseNumberInput(field: Extract<ScopedConfigField, { kind: "number" }>, value: string): NumberInputParseResult {
 	const trimmed = value.trim()
-	if (trimmed === "" || trimmed === "-" || trimmed === "." || trimmed === "-.")
-		return { ok: false, message: `${field.label} must be a number` }
+	if (trimmed === "") return { ok: false, message: `${field.label} must be a number` }
 
 	const parsed = Number(trimmed)
 	if (!Number.isFinite(parsed)) return { ok: false, message: `${field.label} must be a number` }
