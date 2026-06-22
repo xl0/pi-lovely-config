@@ -512,8 +512,8 @@ export class ScopedConfigEditor<Config extends object> {
 
 	private save(scope: ConfigScope, nextConfig: ConfigPatch<Config>): void {
 		this.activeInputError = undefined
-		this.scoped = { ...this.scoped, [scope]: nextConfig }
 		this.spec.saveFile(this.spec.getPath(scope, this.ctx.cwd), nextConfig)
+		this.scoped = { ...this.scoped, [scope]: nextConfig }
 		this.onChange(this.spec.resolve(this.scoped), this.scoped)
 		this.refresh()
 	}

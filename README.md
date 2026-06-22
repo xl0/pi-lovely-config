@@ -34,7 +34,8 @@ Config files use fixed Pi scopes by default:
 Workspace values override User values. Missing files read as empty config patches.
 `loadScoped()` returns per-scope patches. `resolve()` and `load()` return resolved
 config with defaults filled. Invalid JSON/schema throws a diagnostic error with
-the file path. Unknown config-file properties are ignored.
+the file path. Unknown config-file properties are preserved across loads and
+writes, but do not affect typed field behavior.
 
 Use `scope` to restrict a spec to one scope:
 
@@ -52,6 +53,8 @@ Default is `scope: "both"`. Workspace always overrides User. `scope` accepts
 
 Fields support optional `description` and `valueDescriptions`; `ScopedConfigEditor`
 renders the active field and set value descriptions under the field list.
+`visibleWhen` is UI-only: hidden saved values still remain in config and still
+participate in resolution until explicitly cleared or the scope is reset.
 String fields are edited inline; use the include toggle to unset a value.
 Number fields support either `min`/`max`/`step` or explicit `values`, not both.
 `step` controls UI stepping only. Number fields with `values` cycle through those
