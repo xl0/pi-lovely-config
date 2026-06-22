@@ -32,6 +32,7 @@ Supported fields: enum, boolean, string, and number. Fields can include `descrip
 Number fields support either `min`/`max`/`step` or explicit `values`, not both.
 Inline input Esc closes the editor when the input matches persisted state;
 otherwise it reverts the input to persisted state.
+Removing the last explicit value in a scope deletes that scope config file.
 
 ## Manual extension
 
