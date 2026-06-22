@@ -248,11 +248,13 @@ export function defineScopedConfigSpec<const Fields extends readonly ScopedConfi
 		if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("must be an object")
 		const parsed = value as Record<string, unknown>
 		const config: Record<string, unknown> = {}
+		for (const [key, fieldValue] of Object.entries(parsed)) {
+			if (fieldValue !== undefined) config[key] = fieldValue
+		}
 		for (const field of options.fields) {
-			const fieldValue = parsed[field.key]
+			const fieldValue = config[field.key]
 			if (fieldValue === undefined) continue
 			validateConfigValue(field, fieldValue)
-			config[field.key] = fieldValue
 		}
 		return config as ConfigPatch<Config>
 	}
