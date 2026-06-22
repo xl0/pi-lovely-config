@@ -26,7 +26,7 @@ Scopes are fixed:
 Specs default to `scope: "both"`, where workspace always overrides user.
 Specs can restrict active scopes with `scope: "user"` or `scope: "workspace"`.
 Callers cannot configure scope order. Missing files read as empty config patches.
-`loadScoped()` returns user/workspace patches; `resolve()` and `load()` return defaults-filled resolved config.
+`loadScoped()` returns user/workspace patches; `resolve()` and `load()` validate known field values and return defaults-filled resolved config.
 Invalid JSON/config values throw with path and validation details. Unknown file properties are preserved across load/save, but ignored by typed field behavior.
 Validation is implemented locally; TypeBox is used for public schema generation only.
 Config file names must be plain file names, not paths. `saveFile()` validates known fields and deletes empty patches.
