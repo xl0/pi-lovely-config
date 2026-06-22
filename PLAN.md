@@ -7,7 +7,7 @@ Build small scoped config library for Pi extensions, plus a project-local demo e
 ## Todo
 
 - [x] Core scoped config spec with fixed user/workspace paths.
-- [x] TypeBox schema generation and validation.
+- [x] TypeBox schema generation plus local config validation.
 - [x] In-memory effective config state.
 - [x] TUI editor for scope tabs, field cycling, reset, visibility, and override notes.
 - [x] Configurable scope mode for user-only, workspace-only, or combined configs.
