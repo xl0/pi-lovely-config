@@ -33,9 +33,10 @@ Config files use fixed Pi scopes by default:
 
 Workspace values override User values. Missing files read as empty config patches.
 `loadScoped()` returns per-scope patches. `resolve()` and `load()` return resolved
-config with defaults filled. Invalid JSON/schema throws a diagnostic error with
-the file path. Unknown config-file properties are preserved across loads and
-writes, but do not affect typed field behavior.
+config with defaults filled. Known field values are validated when files are
+loaded, patches are resolved, or files are saved. Invalid JSON/schema throws a
+diagnostic error with the file path. Unknown config-file properties are
+preserved across loads and writes, but do not affect typed field behavior.
 
 Use `scope` to restrict a spec to one scope:
 

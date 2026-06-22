@@ -143,8 +143,9 @@ export class ScopedConfigState<Config extends object> {
 	}
 
 	setScoped(next: ScopedConfigPatch<Config>): ResolvedConfig<Config> {
+		const resolved = this.spec.resolve(next)
 		this.scoped = next
-		this.resolved = this.spec.resolve(next)
+		this.resolved = resolved
 		return this.resolved
 	}
 
@@ -230,7 +231,14 @@ export function defineScopedConfigSpec<const Fields extends readonly ScopedConfi
 
 	function resolveScoped(scoped: ScopedConfigPatch<Config>): ResolvedConfig<Config> {
 		let resolved = { ...defaults }
-		for (const scope of scopes) resolved = { ...resolved, ...scoped[scope] }
+		for (const scope of scopes) {
+			try {
+				resolved = { ...resolved, ...parseConfigPatch(scoped[scope]) }
+			} catch (error) {
+				const message = formatConfigParseError(error)
+				throw new Error(`Invalid ${scope} config patch: ${message}`)
+			}
+		}
 		return resolved as ResolvedConfig<Config>
 	}
 
