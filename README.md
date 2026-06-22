@@ -20,11 +20,14 @@ Exports:
 - `ConfigScope`
 - `ConfigScopeMode`
 - `ConfigPatch`
+- `ConfigWarning`
+- `ScopedConfigWarning`
 - `ScopedConfigPatch`
 - `ResolvedConfig`
 - `ScopedConfigField`
 - `ScopedConfigSpec`
 - `ConfigFromFields`
+- `getConfigWarnings()`
 
 Config files use fixed Pi scopes by default:
 
@@ -33,10 +36,13 @@ Config files use fixed Pi scopes by default:
 
 Workspace values override User values. Missing files read as empty config patches.
 `loadScoped()` returns per-scope patches. `resolve()` and `load()` return resolved
-config with defaults filled. Known field values are validated when files are
-loaded, patches are resolved, or files are saved. Invalid JSON/schema throws a
-diagnostic error with the file path. Unknown config-file properties are
-preserved across loads and writes, but do not affect typed field behavior.
+config with defaults filled. Known field types are validated when files are
+loaded, patches are resolved, or files are saved. Invalid JSON/type errors throw
+a diagnostic error with the file path. Numeric range/value mismatches are soft:
+they load and save, emit warnings via `getWarnings()` / `getScopedWarnings()` /
+`getConfigWarnings()`, and are ignored while resolving so lower-scope/default
+values remain effective. Unknown config-file properties are preserved across
+loads and writes, but do not affect typed field behavior.
 
 Use `scope` to restrict a spec to one scope:
 

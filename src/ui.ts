@@ -10,7 +10,7 @@ import {
 	wrapTextWithAnsi
 } from "@earendil-works/pi-tui"
 import type { ConfigPatch, ConfigScope, ResolvedConfig, ScopedConfigField, ScopedConfigPatch, ScopedConfigSpec } from "./config"
-import { getConfigValue } from "./config"
+import { getConfigValue, getConfigWarnings } from "./config"
 
 type RenderTui = { requestRender(): void }
 type Keybindings = ReturnType<typeof getKeybindings>
@@ -27,12 +27,12 @@ export class ScopedConfigEditor<Config extends object> {
 	private readonly spec: ScopedConfigSpec<Config>
 	private readonly onChange: ScopedConfigChangeHandler<Config>
 	private readonly fields: readonly ScopedConfigField[]
-	private readonly defaults: ResolvedConfig<Config>
 	private readonly scopes: readonly ConfigScope[]
 	private readonly done: (result: undefined) => void
 	private activeInput: Input | undefined
 	private activeInputDirty = false
 	private activeInputError: string | undefined
+	private activeInputWarning: string | undefined
 	private focusPart: FocusPart = "value"
 	private currentTab = 0
 	private currentRow = 0
@@ -52,7 +52,6 @@ export class ScopedConfigEditor<Config extends object> {
 		this.spec = options.spec
 		this.onChange = options.onChange
 		this.fields = options.spec.fields
-		this.defaults = options.spec.defaults
 		this.scopes = options.spec.scopes
 		this.scoped = options.scoped
 		this.done = options.done
@@ -242,7 +241,13 @@ export class ScopedConfigEditor<Config extends object> {
 			const value = this.renderFieldValue(this.scoped[scope], field, selected, width)
 			const note = getScopeNote(scope, this.scopes, this.scoped, field)
 			const renderedNote = note ? ` ${this.theme.fg("muted", `(${note})`)}` : ""
-			const valueStyle = !isSet ? "muted" : selected && this.focusPart === "value" ? "accent" : "text"
+			const valueStyle = getFieldWarning(this.scoped[scope], field)
+				? "warning"
+				: !isSet
+					? "muted"
+					: selected && this.focusPart === "value"
+						? "accent"
+						: "text"
 			addWrappedWithPrefix(
 				lines,
 				width,
@@ -256,9 +261,11 @@ export class ScopedConfigEditor<Config extends object> {
 	private renderActiveValueDescription(lines: string[], width: number, scope: ConfigScope, fields: readonly ScopedConfigField[]): void {
 		const field = this.selectedField(fields)
 		const error = this.activeInput ? this.activeInputError : undefined
+		const warning = this.activeInput ? this.activeInputWarning : field ? getFieldWarning(this.scoped[scope], field) : undefined
 		const valueDescription = field ? getValueDescription(this.scoped[scope], field) : undefined
 		lines.push("")
 		if (error) addWrappedWithPrefix(lines, width, " ", this.theme.fg("error", error))
+		else if (warning) addWrappedWithPrefix(lines, width, " ", this.theme.fg("warning", warning))
 		else if (valueDescription) addWrappedWithPrefix(lines, width, " ", this.theme.fg("muted", valueDescription))
 		else lines.push("")
 	}
@@ -293,12 +300,12 @@ export class ScopedConfigEditor<Config extends object> {
 	}
 
 	private resolvedConfig(scope: ConfigScope): Record<string, unknown> {
-		let config: Record<string, unknown> = { ...this.defaults }
+		const scoped = { user: {}, workspace: {} } as ScopedConfigPatch<Config>
 		for (const configScope of this.scopes) {
-			config = { ...config, ...this.scoped[configScope] }
+			scoped[configScope] = this.scoped[configScope]
 			if (configScope === scope) break
 		}
-		return config
+		return this.spec.resolve(scoped)
 	}
 
 	private visibleFields(scope: ConfigScope = this.currentScope()): ScopedConfigField[] {
@@ -371,6 +378,7 @@ export class ScopedConfigEditor<Config extends object> {
 		const nextIsSet = current === undefined
 		this.activeInput = undefined
 		this.activeInputDirty = false
+		this.activeInputWarning = undefined
 		this.save(scope, setConfigValue(this.scoped[scope], field.key, nextIsSet ? field.default : undefined))
 	}
 
@@ -380,6 +388,7 @@ export class ScopedConfigEditor<Config extends object> {
 			this.activeInput = undefined
 			this.activeInputDirty = false
 			this.activeInputError = undefined
+			this.activeInputWarning = undefined
 			return
 		}
 
@@ -388,6 +397,7 @@ export class ScopedConfigEditor<Config extends object> {
 			this.activeInput = undefined
 			this.activeInputDirty = false
 			this.activeInputError = undefined
+			this.activeInputWarning = undefined
 			return
 		}
 
@@ -403,7 +413,7 @@ export class ScopedConfigEditor<Config extends object> {
 		if (field.kind === "string") return typeof persisted === "string" && inputValue === persisted
 		if (field.kind !== "number" || typeof persisted !== "number") return false
 
-		const parsed = parseNumberInput(field, inputValue, { validateRange: false })
+		const parsed = parseNumberInput(field, inputValue)
 		return parsed.ok && parsed.value === persisted
 	}
 
@@ -459,12 +469,14 @@ export class ScopedConfigEditor<Config extends object> {
 			const parsed = parseNumberInput(field, value)
 			if (!parsed.ok) {
 				this.activeInputError = parsed.message
+				this.activeInputWarning = undefined
 				this.tui.requestRender()
 				return false
 			}
 			this.activeInput = undefined
 			this.activeInputDirty = false
 			this.activeInputError = undefined
+			this.activeInputWarning = undefined
 			this.save(this.currentScope(), setConfigValue(this.scoped[this.currentScope()], field.key, parsed.value))
 			return true
 		}
@@ -472,6 +484,7 @@ export class ScopedConfigEditor<Config extends object> {
 		this.activeInput = undefined
 		this.activeInputDirty = false
 		this.activeInputError = undefined
+		this.activeInputWarning = undefined
 		this.save(this.currentScope(), setConfigValue(this.scoped[this.currentScope()], field.key, value))
 		return true
 	}
@@ -480,9 +493,10 @@ export class ScopedConfigEditor<Config extends object> {
 		const field = this.selectedField()
 		if (field?.kind !== "number" || !this.activeInput) return
 
-		const parsed = parseNumberInput(field, this.activeInput.getValue(), { validateRange: false })
+		const parsed = parseNumberInput(field, this.activeInput.getValue())
 		if (!parsed.ok) {
 			this.activeInputError = parsed.message
+			this.activeInputWarning = undefined
 			this.tui.requestRender()
 			return
 		}
@@ -497,21 +511,25 @@ export class ScopedConfigEditor<Config extends object> {
 		this.activeInput = undefined
 		this.activeInputDirty = false
 		this.activeInputError = undefined
+		this.activeInputWarning = undefined
 		this.save(this.currentScope(), setConfigValue(this.scoped[this.currentScope()], field.key, nextNumberValue(field, base)))
 	}
 
 	private updateActiveInputError(field: ScopedConfigField): void {
 		if (field.kind !== "number" || field.values || !this.activeInput) {
 			this.activeInputError = undefined
+			this.activeInputWarning = undefined
 			return
 		}
 
 		const parsed = parseNumberInput(field, this.activeInput.getValue())
 		this.activeInputError = parsed.ok ? undefined : parsed.message
+		this.activeInputWarning = parsed.ok ? getFieldValueWarning(field, parsed.value) : undefined
 	}
 
 	private save(scope: ConfigScope, nextConfig: ConfigPatch<Config>): void {
 		this.activeInputError = undefined
+		this.activeInputWarning = undefined
 		this.spec.saveFile(this.spec.getPath(scope, this.ctx.cwd), nextConfig)
 		this.scoped = { ...this.scoped, [scope]: nextConfig }
 		this.onChange(this.spec.resolve(this.scoped), this.scoped)
@@ -589,20 +607,13 @@ function isNumberInputAllowed(data: string, input: Input | undefined, kb: Keybin
 	return data.length !== 1
 }
 
-function parseNumberInput(
-	field: Extract<ScopedConfigField, { kind: "number" }>,
-	value: string,
-	options: { validateRange?: boolean } = {}
-): NumberInputParseResult {
+function parseNumberInput(field: Extract<ScopedConfigField, { kind: "number" }>, value: string): NumberInputParseResult {
 	const trimmed = value.trim()
 	if (trimmed === "" || trimmed === "-" || trimmed === "." || trimmed === "-.")
 		return { ok: false, message: `${field.label} must be a number` }
 
 	const parsed = Number(trimmed)
 	if (!Number.isFinite(parsed)) return { ok: false, message: `${field.label} must be a number` }
-	if (options.validateRange === false) return { ok: true, value: parsed }
-	if (field.min !== undefined && parsed < field.min) return { ok: false, message: `${field.label} must be at least ${field.min}` }
-	if (field.max !== undefined && parsed > field.max) return { ok: false, message: `${field.label} must be at most ${field.max}` }
 	return { ok: true, value: parsed }
 }
 
@@ -639,6 +650,14 @@ function formatScopedValue(config: object, field: ScopedConfigField): string {
 	return formatFieldValue(field, value)
 }
 
+function getFieldWarning(config: object, field: ScopedConfigField): string | undefined {
+	return getConfigWarnings([field], config)[0]?.message
+}
+
+function getFieldValueWarning(field: ScopedConfigField, value: unknown): string | undefined {
+	return getConfigWarnings([field], { [field.key]: value })[0]?.message
+}
+
 function getValueDescription(config: object, field: ScopedConfigField): string | undefined {
 	const rawValue = getConfigValue(config, field.key)
 	if (rawValue === undefined) return undefined
@@ -671,25 +690,29 @@ function getScopeNote<Config extends object>(
 ): string | undefined {
 	const userValue = getConfigValue(configs.user, field.key)
 	const workspaceValue = getConfigValue(configs.workspace, field.key)
-	const user = userValue === undefined ? undefined : formatFieldValue(field, userValue)
-	const workspace = workspaceValue === undefined ? undefined : formatFieldValue(field, workspaceValue)
+	const userWarning = userValue === undefined ? undefined : getFieldValueWarning(field, userValue)
+	const workspaceWarning = workspaceValue === undefined ? undefined : getFieldValueWarning(field, workspaceValue)
+	const user = userValue === undefined || userWarning ? undefined : formatFieldValue(field, userValue)
+	const workspace = workspaceValue === undefined || workspaceWarning ? undefined : formatFieldValue(field, workspaceValue)
 	const defaultValue = formatFieldValue(field, field.default)
+	const prefix = scope === "user" ? (userWarning ? "ignored; " : "") : workspaceWarning ? "ignored; " : ""
 	if (scopes.length === 1) {
 		const value = scope === "user" ? user : workspace
-		return value === undefined ? `uses default: ${defaultValue}` : `overrides default: ${defaultValue}`
+		return `${prefix}${value === undefined ? `uses default: ${defaultValue}` : `overrides default: ${defaultValue}`}`
 	}
 
-	if (user === undefined && workspace === undefined) return `uses default: ${defaultValue}`
+	if (user === undefined && workspace === undefined) return `${prefix}uses default: ${defaultValue}`
 
 	if (scope === "user") {
-		if (user !== undefined && workspace !== undefined) return `Workspace overrides with: ${workspace}`
-		if (user === undefined && workspace !== undefined) return `Workspace sets: ${workspace}`
+		if (user !== undefined && workspace !== undefined) return `${prefix}Workspace overrides with: ${workspace}`
+		if (user === undefined && workspace !== undefined) return `${prefix}Workspace sets: ${workspace}`
 		return undefined
 	}
 
-	if (workspace === undefined && user !== undefined) return `inherits User: ${user}`
-	if (workspace !== undefined && user !== undefined) return workspace === user ? `same as User: ${user}` : `overrides User: ${user}`
-	if (workspace !== undefined && user === undefined) return `overrides default: ${defaultValue}`
+	if (workspace === undefined && user !== undefined) return `${prefix}inherits User: ${user}`
+	if (workspace !== undefined && user !== undefined)
+		return `${prefix}${workspace === user ? `same as User: ${user}` : `overrides User: ${user}`}`
+	if (workspace !== undefined && user === undefined) return `${prefix}overrides default: ${defaultValue}`
 	return undefined
 }
 

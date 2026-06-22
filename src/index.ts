@@ -5,6 +5,7 @@ export type {
 	ConfigScope,
 	ConfigScopeMode,
 	ConfigScopes,
+	ConfigWarning,
 	EnumConfigField,
 	NumberConfigField,
 	RangedNumberConfigField,
@@ -12,9 +13,10 @@ export type {
 	ScopedConfigField,
 	ScopedConfigPatch,
 	ScopedConfigSpec,
+	ScopedConfigWarning,
 	StringConfigField,
 	ValuedNumberConfigField,
 	VisibilityContext
 } from "./config"
-export { createScopedConfigSchema, defineScopedConfigSpec, ScopedConfigState } from "./config"
+export { createScopedConfigSchema, defineScopedConfigSpec, getConfigWarnings, ScopedConfigState } from "./config"
 export { ScopedConfigEditor } from "./ui"
