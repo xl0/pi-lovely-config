@@ -176,8 +176,7 @@ async function openDemoEditor<Config extends object>(
 	spec: ScopedConfigSpec<Config>,
 	state: ScopedConfigState<Config>
 ): Promise<void> {
-	const scoped = spec.loadScoped(ctx.cwd)
-	state.set(spec.resolve(scoped))
+	const scoped = state.loadScoped(ctx.cwd)
 
 	if (ctx.mode !== "tui") {
 		ctx.ui.notify(formatEffectiveConfig(state), "info")
@@ -191,8 +190,8 @@ async function openDemoEditor<Config extends object>(
 			ctx,
 			spec,
 			scoped,
-			onChange: resolved => {
-				state.set(resolved)
+			onChange: (_resolved, scoped) => {
+				state.setScoped(scoped)
 				ctx.ui.setStatus(statusKey, formatEffectiveConfig(state))
 			},
 			done
