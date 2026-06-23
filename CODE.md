@@ -52,4 +52,7 @@ It opens `ScopedConfigEditor` in TUI mode, showing enum, boolean, nested, and co
 
 - `bun run typecheck` typechecks `src` and `extensions`.
 - `bun run biome:check` checks formatting/linting.
-- Pi packages (`@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, `typebox`) are peers at runtime and local dev deps for typechecking.
+- Published package is a library module, not a Pi extension package.
+  It ships `src/`, `README.md`, and `LICENSE` only.
+- `typebox` is a runtime dependency.
+- Pi packages (`@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`) are runtime peers and local dev deps for typechecking.
