@@ -13,7 +13,7 @@ Core files:
 Public API:
 
 - `defineScopedConfigSpec()` to declare fields, defaults, schema, paths, load/write/delete, and user/workspace merge semantics.
-- `createScopedConfigSchema()` for TypeBox schemas from fields.
+- `createScopedConfigSchema()` for plain JSON Schema-like objects from fields.
 - `ScopedConfigState` for in-memory scoped patch and resolved config access.
 - `ScopedConfigEditor` custom TUI component for editing user/workspace scopes.
 - `getConfigWarnings()` and spec `getWarnings()` / `getScopedWarnings()` for soft validation diagnostics.
@@ -29,7 +29,9 @@ Specs can restrict active scopes with `scope: "user"` or `scope: "workspace"`.
 Callers cannot configure scope order. Missing files read as empty config patches.
 `loadScoped()` returns user/workspace patches; `resolve()` and `load()` validate known field types and return defaults-filled resolved config.
 Invalid JSON/type values throw with path and validation details. Unknown file properties are preserved across load/save, but ignored by typed field behavior.
-Validation is implemented locally; TypeBox is used for public schema generation only.
+Validation is implemented locally; schema generation has no runtime dependency.
+Generated schemas include field defaults, descriptions, enum values, and number
+minimum/maximum bounds.
 Config file names must be plain file names, not paths. `saveFile()` validates known fields and deletes empty patches.
 
 Supported fields: enum, boolean, string, and number. Fields can include `description` and `valueDescriptions`, be indented with `depth`, and hidden with `visibleWhen`.
@@ -54,5 +56,5 @@ It opens `ScopedConfigEditor` in TUI mode, showing enum, boolean, nested, and co
 - `bun run biome:check` checks formatting/linting.
 - Published package is a library module, not a Pi extension package.
   It ships `src/`, `README.md`, and `LICENSE` only.
-- `typebox` is a runtime dependency.
+- No runtime dependencies beyond Pi peer packages.
 - Pi packages (`@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`) are runtime peers and local dev deps for typechecking.
