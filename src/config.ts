@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, isAbsolute, join, resolve } from "node:path"
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent"
-import { type TObject, type TSchema, Type } from "typebox"
 
 export type ConfigScope = "user" | "workspace"
 export type ConfigScopeMode = ConfigScope | "both"
@@ -11,6 +10,36 @@ export type ResolvedConfig<Config extends object> = { [Key in keyof Config]-?: N
 export type ConfigScopes = readonly [ConfigScope] | readonly ["user", "workspace"]
 export type ConfigWarning = { key: string; message: string }
 export type ScopedConfigWarning = ConfigWarning & { scope: ConfigScope; path: string }
+
+export type ConfigStringJsonSchema = {
+	type: "string"
+	default?: string
+	description?: string
+	enum?: string[]
+}
+
+export type ConfigBooleanJsonSchema = {
+	type: "boolean"
+	default?: boolean
+	description?: string
+}
+
+export type ConfigNumberJsonSchema = {
+	type: "number"
+	default?: number
+	description?: string
+	enum?: number[]
+	minimum?: number
+	maximum?: number
+}
+
+export type ConfigFieldJsonSchema = ConfigStringJsonSchema | ConfigBooleanJsonSchema | ConfigNumberJsonSchema
+
+export type ConfigObjectJsonSchema = {
+	type: "object"
+	properties: Record<string, ConfigFieldJsonSchema>
+	additionalProperties: true
+}
 
 type EnumValues = readonly [string, ...string[]]
 type NumberValues = readonly [number, ...number[]]
@@ -113,7 +142,7 @@ export type ScopedConfigSpec<Config extends object> = {
 	fileName: string
 	scopes: ConfigScopes
 	fields: readonly ScopedConfigField[]
-	schema: TSchema
+	schema: ConfigObjectJsonSchema
 	defaults: ResolvedConfig<Config>
 	get<Key extends keyof Config>(config: ConfigPatch<Config> | ResolvedConfig<Config>, key: Key): NonNullable<Config[Key]>
 	getPath(scope: ConfigScope, cwd: string): string
@@ -170,13 +199,13 @@ export class ScopedConfigState<Config extends object> {
 	}
 }
 
-export function createScopedConfigSchema(fields: readonly ScopedConfigField[]): TObject {
+export function createScopedConfigSchema(fields: readonly ScopedConfigField[]): ConfigObjectJsonSchema {
 	validateFields(fields)
-	const properties: Record<string, TSchema> = {}
+	const properties: Record<string, ConfigFieldJsonSchema> = {}
 	for (const field of fields) {
-		properties[field.key] = Type.Optional(createFieldSchema(field))
+		properties[field.key] = createFieldSchema(field)
 	}
-	return Type.Object(properties, { additionalProperties: true })
+	return { type: "object", properties, additionalProperties: true }
 }
 
 export function defineScopedConfigSpec<const Fields extends readonly ScopedConfigField[]>(options: {
@@ -185,7 +214,7 @@ export function defineScopedConfigSpec<const Fields extends readonly ScopedConfi
 	fields: Fields & ValidateEnumDefaults<Fields> & ValidateNumberDefaults<Fields>
 }): ScopedConfigSpec<ConfigFromFields<Fields>> & {
 	fields: Fields
-	schema: TObject
+	schema: ConfigObjectJsonSchema
 } {
 	type Config = ConfigFromFields<Fields>
 	validateConfigFileName(options.fileName)
@@ -382,24 +411,27 @@ function validateFields(fields: readonly ScopedConfigField[]): void {
 	}
 }
 
-function createFieldSchema(field: ScopedConfigField): TSchema {
+function createFieldSchema(field: ScopedConfigField): ConfigFieldJsonSchema {
+	const description = field.description === undefined ? {} : { description: field.description }
 	switch (field.kind) {
 		case "enum":
 			if (field.values.length === 0) throw new Error(`Enum field ${field.key} must have at least one value`)
-			return Type.Union(field.values.map(value => Type.Literal(value)) as unknown as [TSchema, ...TSchema[]], { default: field.default })
+			return { type: "string", enum: [...field.values], default: field.default, ...description }
 		case "boolean":
-			return Type.Boolean({ default: field.default })
+			return { type: "boolean", default: field.default, ...description }
 		case "string":
-			return Type.String({ default: field.default })
+			return { type: "string", default: field.default, ...description }
 		case "number":
 			if (field.values) {
-				return Type.Union(field.values.map(value => Type.Literal(value)) as unknown as [TSchema, ...TSchema[]], { default: field.default })
+				return { type: "number", enum: [...field.values], default: field.default, ...description }
 			}
-			return Type.Number({
+			return {
+				type: "number",
 				default: field.default,
+				...description,
 				...(field.min === undefined ? {} : { minimum: field.min }),
 				...(field.max === undefined ? {} : { maximum: field.max })
-			})
+			}
 	}
 }
 
