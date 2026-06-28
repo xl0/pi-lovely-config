@@ -58,3 +58,5 @@ It opens `ScopedConfigEditor` in TUI mode, showing enum, boolean, nested, and co
   It ships `src/`, `README.md`, and `LICENSE` only.
 - No runtime dependencies beyond Pi peer packages.
 - Pi packages (`@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`) are runtime peers and local dev deps for typechecking.
+- `README.md` is structured like Pi docs: capabilities, table of contents,
+  purpose, config model, API overview, runtime flow, TUI editor, and full usage example.
