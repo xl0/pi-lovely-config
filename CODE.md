@@ -17,7 +17,7 @@ Public API:
 - `ScopedConfigState` for in-memory scoped patch and resolved config access.
 - `ScopedConfigEditor` custom TUI component for editing user/workspace scopes.
 - `getConfigWarnings()` and spec `getWarnings()` / `getScopedWarnings()` for soft validation diagnostics.
-- Types for scopes, specs, fields, and field-derived config.
+- Root exports keep to core entrypoints plus small type set: scopes, spec, fields, field-derived config.
 
 Scopes are fixed:
 
