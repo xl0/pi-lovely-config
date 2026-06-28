@@ -1,47 +1,33 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { dirname, isAbsolute, join, resolve } from "node:path"
+import { dirname, isAbsolute, join, resolve as resolvePath } from "node:path"
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent"
 
 export type ConfigScope = "user" | "workspace"
 export type ConfigScopeMode = ConfigScope | "both"
-export type ConfigPatch<Config extends object> = Partial<Config> & Record<string, unknown>
-export type ScopedConfigPatch<Config extends object> = Record<ConfigScope, ConfigPatch<Config>>
-export type ResolvedConfig<Config extends object> = { [Key in keyof Config]-?: NonNullable<Config[Key]> } & Record<string, unknown>
 export type ConfigScopes = readonly [ConfigScope] | readonly ["user", "workspace"]
+export type ConfigPatch = Record<string, unknown>
+export type ScopedConfigPatch = Record<ConfigScope, ConfigPatch>
+export type ResolvedConfig<Config extends object> = { [Key in keyof Config]-?: NonNullable<Config[Key]> }
 export type ConfigWarning = { key: string; message: string }
 export type ScopedConfigWarning = ConfigWarning & { scope: ConfigScope; path: string }
 
-export type ConfigStringJsonSchema = {
-	type: "string"
-	default?: string
-	description?: string
-	enum?: string[]
-}
-
-export type ConfigBooleanJsonSchema = {
-	type: "boolean"
-	default?: boolean
-	description?: string
-}
-
-export type ConfigNumberJsonSchema = {
-	type: "number"
-	default?: number
-	description?: string
-	enum?: number[]
-	minimum?: number
-	maximum?: number
-}
-
-export type ConfigFieldJsonSchema = ConfigStringJsonSchema | ConfigBooleanJsonSchema | ConfigNumberJsonSchema
-
-export type ConfigObjectJsonSchema = {
+export type ConfigJsonSchema = {
 	type: "object"
-	properties: Record<string, ConfigFieldJsonSchema>
+	properties: Record<
+		string,
+		{
+			type: "string" | "boolean" | "number"
+			default?: unknown
+			description?: string
+			enum?: unknown[]
+			minimum?: number
+			maximum?: number
+		}
+	>
 	additionalProperties: true
 }
 
-type EnumValues = readonly [string, ...string[]]
+type StringValues = readonly [string, ...string[]]
 type NumberValues = readonly [number, ...number[]]
 
 export type VisibilityContext = {
@@ -50,20 +36,22 @@ export type VisibilityContext = {
 	scope: ConfigScope
 }
 
-type BaseField = {
-	key: string
-	label: string
+type FieldMeta = {
+	label?: string
 	description?: string
-	kind: "enum" | "boolean" | "string" | "number"
 	depth?: number
 	visibleWhen?: (ctx: VisibilityContext) => boolean
 }
 
-export type EnumConfigField = BaseField & {
+type BaseField = FieldMeta & {
+	kind: "enum" | "boolean" | "string" | "number"
+}
+
+export type EnumConfigField<Values extends StringValues = StringValues> = BaseField & {
 	kind: "enum"
-	values: EnumValues
-	valueDescriptions?: Record<string, string>
-	default: string
+	values: Values
+	valueDescriptions?: Partial<Record<Values[number], string>> & Record<string, string>
+	default: Values[number]
 }
 
 export type BooleanConfigField = BaseField & {
@@ -90,18 +78,21 @@ export type RangedNumberConfigField = BaseNumberConfigField & {
 	values?: never
 }
 
-export type ValuedNumberConfigField = BaseNumberConfigField & {
-	values: NumberValues
+export type ValuedNumberConfigField<Values extends NumberValues = NumberValues> = BaseNumberConfigField & {
+	values: Values
+	default: Values[number]
 	min?: never
 	max?: never
 	step?: never
 }
 
 export type NumberConfigField = RangedNumberConfigField | ValuedNumberConfigField
+export type ConfigField = EnumConfigField | BooleanConfigField | StringConfigField | NumberConfigField
+export type ConfigSchema = Record<string, ConfigField>
+export type ScopedConfigField = ConfigField & { key: string; label: string }
 
-export type ScopedConfigField = EnumConfigField | BooleanConfigField | StringConfigField | NumberConfigField
-export type ConfigFromFields<Fields extends readonly ScopedConfigField[]> = {
-	[Field in Fields[number] as Field["key"]]: FieldValue<Field>
+export type ConfigFromSchema<Schema extends ConfigSchema> = {
+	[Key in keyof Schema]: FieldValue<Schema[Key]>
 }
 
 type FieldValue<Field> = Field extends { kind: "enum"; values: infer Values extends readonly string[] }
@@ -115,233 +106,146 @@ type FieldValue<Field> = Field extends { kind: "enum"; values: infer Values exte
 				: Field extends { kind: "number" }
 					? number
 					: never
-type ValidateEnumDefaults<Fields extends readonly ScopedConfigField[]> = {
-	[Index in keyof Fields]: Fields[Index] extends {
-		kind: "enum"
-		values: infer Values extends readonly string[]
-		default: infer Default extends string
-	}
-		? Default extends Values[number]
-			? unknown
-			: { enumDefaultMustBeOneOf: Values[number] }
-		: unknown
-}
-type ValidateNumberDefaults<Fields extends readonly ScopedConfigField[]> = {
-	[Index in keyof Fields]: Fields[Index] extends {
-		kind: "number"
-		values: infer Values extends readonly number[]
-		default: infer Default extends number
-	}
-		? Default extends Values[number]
-			? unknown
-			: { numberDefaultMustBeOneOf: Values[number] }
-		: unknown
+
+export type LoadedConfig<Config extends object> = {
+	value: ResolvedConfig<Config>
+	scoped: ScopedConfigPatch
+	warnings: ScopedConfigWarning[]
 }
 
-export type ScopedConfigSpec<Config extends object> = {
+export type ScopedConfig<Config extends object> = {
 	fileName: string
 	scopes: ConfigScopes
 	fields: readonly ScopedConfigField[]
-	schema: ConfigObjectJsonSchema
 	defaults: ResolvedConfig<Config>
-	get<Key extends keyof Config>(config: ConfigPatch<Config> | ResolvedConfig<Config>, key: Key): NonNullable<Config[Key]>
-	getPath(scope: ConfigScope, cwd: string): string
-	readFileOrEmpty(path: string): ConfigPatch<Config>
-	saveFile(path: string, config: ConfigPatch<Config>): void
-	deleteFile(path: string): void
-	getWarnings(config: ConfigPatch<Config> | ResolvedConfig<Config>): ConfigWarning[]
-	getScopedWarnings(scoped: ScopedConfigPatch<Config>, cwd: string): ScopedConfigWarning[]
-	resolve(scoped: ScopedConfigPatch<Config>): ResolvedConfig<Config>
-	loadScoped(cwd: string): ScopedConfigPatch<Config>
-	load(cwd: string): ResolvedConfig<Config>
+	jsonSchema: ConfigJsonSchema
+	path(scope: ConfigScope, cwd: string): string
+	resolve(scoped: ScopedConfigPatch): ResolvedConfig<Config>
+	load(cwd: string): LoadedConfig<Config>
+	update<Key extends keyof Config & string>(
+		cwd: string,
+		change: { scope: ConfigScope; key: Key; value: Config[Key] | undefined }
+	): LoadedConfig<Config>
+	resetScope(cwd: string, scope: ConfigScope): LoadedConfig<Config>
 }
 
-export class ScopedConfigState<Config extends object> {
-	private scoped: ScopedConfigPatch<Config> = emptyScopedConfig()
-	private resolved: ResolvedConfig<Config> = {} as ResolvedConfig<Config>
+type EnumFieldOptions<Values extends StringValues> = Omit<EnumConfigField<Values>, "kind" | "values" | "default">
+type BooleanFieldOptions = Omit<BooleanConfigField, "kind" | "default">
+type StringFieldOptions = Omit<StringConfigField, "kind" | "default">
+type RangedNumberOptions = Omit<RangedNumberConfigField, "kind" | "default">
+type ValuedNumberOptions<Values extends NumberValues> = Omit<ValuedNumberConfigField<Values>, "kind" | "default">
 
-	constructor(readonly spec: ScopedConfigSpec<Config>) {
-		this.resolved = spec.resolve(this.scoped)
-	}
-
-	loadScoped(cwd: string): ScopedConfigPatch<Config> {
-		this.scoped = this.spec.loadScoped(cwd)
-		this.resolved = this.spec.resolve(this.scoped)
-		return this.scoped
-	}
-
-	load(cwd: string): ResolvedConfig<Config> {
-		this.loadScoped(cwd)
-		return this.resolved
-	}
-
-	setScoped(next: ScopedConfigPatch<Config>): ResolvedConfig<Config> {
-		const resolved = this.spec.resolve(next)
-		this.scoped = next
-		this.resolved = resolved
-		return this.resolved
-	}
-
-	reset(): ResolvedConfig<Config> {
-		return this.setScoped(emptyScopedConfig())
-	}
-
-	getScoped(): ScopedConfigPatch<Config> {
-		return this.scoped
-	}
-
-	getResolved(): ResolvedConfig<Config> {
-		return this.resolved
-	}
-
-	get<Key extends keyof Config>(key: Key): NonNullable<Config[Key]> {
-		return this.spec.get(this.resolved, key)
-	}
+function enumField<const Values extends StringValues>(
+	values: Values,
+	defaultValue: Values[number],
+	options: EnumFieldOptions<Values> = {}
+): EnumConfigField<Values> {
+	return { kind: "enum", values, default: defaultValue, ...options }
 }
 
-export function createScopedConfigSchema(fields: readonly ScopedConfigField[]): ConfigObjectJsonSchema {
-	validateFields(fields)
-	const properties: Record<string, ConfigFieldJsonSchema> = {}
-	for (const field of fields) {
-		properties[field.key] = createFieldSchema(field)
-	}
-	return { type: "object", properties, additionalProperties: true }
+function booleanField(defaultValue: boolean, options: BooleanFieldOptions = {}): BooleanConfigField {
+	return { kind: "boolean", default: defaultValue, ...options }
 }
 
-export function defineScopedConfigSpec<const Fields extends readonly ScopedConfigField[]>(options: {
+function stringField(defaultValue: string, options: StringFieldOptions = {}): StringConfigField {
+	return { kind: "string", default: defaultValue, ...options }
+}
+
+function numberField<const Values extends NumberValues>(
+	defaultValue: Values[number],
+	options: ValuedNumberOptions<Values>
+): ValuedNumberConfigField<Values>
+function numberField(defaultValue: number, options?: RangedNumberOptions): RangedNumberConfigField
+function numberField(defaultValue: number, options: RangedNumberOptions | ValuedNumberOptions<NumberValues> = {}): NumberConfigField {
+	return { kind: "number", default: defaultValue, ...options } as NumberConfigField
+}
+
+export const field = {
+	enum: enumField,
+	boolean: booleanField,
+	string: stringField,
+	number: numberField
+}
+
+export function defineScopedConfig<const Schema extends ConfigSchema>(options: {
 	fileName: string
 	scope?: ConfigScopeMode
-	fields: Fields & ValidateEnumDefaults<Fields> & ValidateNumberDefaults<Fields>
-}): ScopedConfigSpec<ConfigFromFields<Fields>> & {
-	fields: Fields
-	schema: ConfigObjectJsonSchema
-} {
-	type Config = ConfigFromFields<Fields>
+	schema: Schema
+}): ScopedConfig<ConfigFromSchema<Schema>> {
+	type Config = ConfigFromSchema<Schema>
 	validateConfigFileName(options.fileName)
-	const schema = createScopedConfigSchema(options.fields)
-	const defaults = defaultConfig(options.fields) as ResolvedConfig<Config>
+	const fields = normalizeFields(options.schema)
+	validateFields(fields)
+	const defaults = defaultConfig(fields) as ResolvedConfig<Config>
 	const scopes = normalizeScopeMode(options.scope)
+	const fieldByKey = new Map(fields.map(field => [field.key, field]))
 
-	function get<Key extends keyof Config>(config: ConfigPatch<Config> | ResolvedConfig<Config>, key: Key): NonNullable<Config[Key]> {
-		const value = getConfigValue(config, String(key))
-		return (value === undefined ? defaults[key] : value) as NonNullable<Config[Key]>
+	function path(scope: ConfigScope, cwd: string): string {
+		return scope === "user" ? join(getAgentDir(), options.fileName) : resolvePath(cwd, CONFIG_DIR_NAME, options.fileName)
 	}
 
-	function getPath(scope: ConfigScope, cwd: string): string {
-		return scope === "user" ? join(getAgentDir(), options.fileName) : resolve(cwd, CONFIG_DIR_NAME, options.fileName)
-	}
-
-	function readFileOrEmpty(path: string): ConfigPatch<Config> {
-		if (!existsSync(path)) return {} as ConfigPatch<Config>
-		const raw = readFileSync(path, "utf-8")
-		try {
-			return parseConfigPatch(JSON.parse(raw))
-		} catch (error) {
-			const message = formatConfigParseError(error)
-			throw new Error(`Invalid config at ${path}: ${message}`)
-		}
-	}
-
-	function saveFile(path: string, config: ConfigPatch<Config>): void {
-		let parsed: ConfigPatch<Config>
-		try {
-			parsed = parseConfigPatch(config)
-		} catch (error) {
-			const message = formatConfigParseError(error)
-			throw new Error(`Invalid config at ${path}: ${message}`)
-		}
-		if (Object.keys(parsed).length === 0) {
-			deleteFile(path)
-			return
-		}
-		mkdirSync(dirname(path), { recursive: true })
-		writeFileSync(path, `${JSON.stringify(parsed, null, 2)}\n`, "utf-8")
-	}
-
-	function deleteFile(path: string): void {
-		rmSync(path, { force: true })
-	}
-
-	function getWarnings(config: ConfigPatch<Config> | ResolvedConfig<Config>): ConfigWarning[] {
-		return getConfigWarnings(options.fields, config)
-	}
-
-	function getScopedWarnings(scoped: ScopedConfigPatch<Config>, cwd: string): ScopedConfigWarning[] {
-		const warnings: ScopedConfigWarning[] = []
+	function resolve(scoped: ScopedConfigPatch): ResolvedConfig<Config> {
+		const resolved: Record<string, unknown> = { ...defaults }
 		for (const scope of scopes) {
-			const path = getPath(scope, cwd)
-			for (const warning of getWarnings(scoped[scope])) warnings.push({ ...warning, scope, path })
-		}
-		return warnings
-	}
-
-	function resolveScoped(scoped: ScopedConfigPatch<Config>): ResolvedConfig<Config> {
-		let resolved = { ...defaults }
-		for (const scope of scopes) {
-			try {
-				resolved = { ...resolved, ...createResolvingPatch(parseConfigPatch(scoped[scope])) }
-			} catch (error) {
-				const message = formatConfigParseError(error)
-				throw new Error(`Invalid ${scope} config patch: ${message}`)
+			for (const field of fields) {
+				const value = scoped[scope][field.key]
+				if (value !== undefined && !getConfigValueWarning(field, value)) resolved[field.key] = value
 			}
 		}
 		return resolved as ResolvedConfig<Config>
 	}
 
-	function loadScoped(cwd: string): ScopedConfigPatch<Config> {
-		const scoped = emptyScopedConfig<Config>()
-		for (const scope of scopes) scoped[scope] = readFileOrEmpty(getPath(scope, cwd))
-		return scoped
+	function load(cwd: string): LoadedConfig<Config> {
+		const scoped = emptyScopedConfig()
+		for (const scope of scopes) scoped[scope] = readConfigFile(path(scope, cwd))
+		return { value: resolve(scoped), scoped, warnings: getScopedWarnings(fields, scoped, scopes, path, cwd) }
 	}
 
-	function load(cwd: string): ResolvedConfig<Config> {
-		return resolveScoped(loadScoped(cwd))
+	function update<Key extends keyof Config & string>(
+		cwd: string,
+		change: { scope: ConfigScope; key: Key; value: Config[Key] | undefined }
+	): LoadedConfig<Config> {
+		assertActiveScope(scopes, change.scope)
+		const configField = fieldByKey.get(change.key)
+		if (!configField) throw new Error(`Unknown config key: ${change.key}`)
+		if (change.value !== undefined) validateUpdateValue(configField, change.value)
+
+		const configPath = path(change.scope, cwd)
+		const config = readConfigFile(configPath)
+		if (change.value === undefined) delete config[change.key]
+		else config[change.key] = change.value
+		writeConfigFile(configPath, config)
+		return load(cwd)
 	}
 
-	function parseConfigPatch(value: unknown): ConfigPatch<Config> {
-		if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("must be an object")
-		const parsed = value as Record<string, unknown>
-		const config: Record<string, unknown> = {}
-		for (const [key, fieldValue] of Object.entries(parsed)) {
-			if (fieldValue !== undefined) config[key] = fieldValue
-		}
-		for (const field of options.fields) {
-			const fieldValue = config[field.key]
-			if (fieldValue === undefined) continue
-			validateConfigValue(field, fieldValue)
-		}
-		return config as ConfigPatch<Config>
-	}
-
-	function createResolvingPatch(config: ConfigPatch<Config>): ConfigPatch<Config> {
-		const resolving = { ...(config as Record<string, unknown>) }
-		for (const field of options.fields) {
-			const fieldValue = resolving[field.key]
-			if (fieldValue !== undefined && getConfigValueWarning(field, fieldValue)) delete resolving[field.key]
-		}
-		return resolving as ConfigPatch<Config>
+	function resetScope(cwd: string, scope: ConfigScope): LoadedConfig<Config> {
+		assertActiveScope(scopes, scope)
+		const configPath = path(scope, cwd)
+		const config = readConfigFile(configPath)
+		for (const field of fields) delete config[field.key]
+		writeConfigFile(configPath, config)
+		return load(cwd)
 	}
 
 	return {
 		fileName: options.fileName,
 		scopes,
-		fields: options.fields,
-		schema,
+		fields,
 		defaults,
-		get,
-		getPath,
-		readFileOrEmpty,
-		saveFile,
-		deleteFile,
-		getWarnings,
-		getScopedWarnings,
-		resolve: resolveScoped,
-		loadScoped,
-		load
+		jsonSchema: createJsonSchema(fields),
+		path,
+		resolve,
+		load,
+		update,
+		resetScope
 	}
 }
 
-function emptyScopedConfig<Config extends object>(): ScopedConfigPatch<Config> {
+function normalizeFields(schema: ConfigSchema): ScopedConfigField[] {
+	return Object.entries(schema).map(([key, field]) => ({ ...field, key, label: field.label ?? key }))
+}
+
+function emptyScopedConfig(): ScopedConfigPatch {
 	return { user: {}, workspace: {} }
 }
 
@@ -353,105 +257,112 @@ function validateConfigFileName(fileName: string): void {
 
 function normalizeScopeMode(scope: ConfigScopeMode | undefined): ConfigScopes {
 	const mode = scope ?? "both"
-	if (mode === "user") return ["user"] as const
-	if (mode === "workspace") return ["workspace"] as const
-	if (mode === "both") return ["user", "workspace"] as const
+	if (mode === "user") return ["user"]
+	if (mode === "workspace") return ["workspace"]
+	if (mode === "both") return ["user", "workspace"]
 	throw new Error(`Invalid config scope mode: ${String(mode)}`)
+}
+
+function assertActiveScope(scopes: ConfigScopes, scope: ConfigScope): void {
+	if (!scopes.includes(scope)) throw new Error(`Config scope is not active: ${scope}`)
 }
 
 function validateFields(fields: readonly ScopedConfigField[]): void {
 	const keys = new Set<string>()
 	for (const field of fields) {
+		if (!field.key) throw new Error("Config field key must not be empty")
 		if (keys.has(field.key)) throw new Error(`Duplicate config field key: ${field.key}`)
 		keys.add(field.key)
 		if (field.depth !== undefined && (!Number.isInteger(field.depth) || field.depth < 0)) {
 			throw new Error(`Config field ${field.key} depth must be a non-negative integer`)
 		}
 
-		if (field.kind !== "enum") continue
-		if (field.values.length === 0) throw new Error(`Enum field ${field.key} must have at least one value`)
-		if (!field.values.includes(field.default)) {
-			throw new Error(`Enum field ${field.key} default must be one of: ${field.values.join(", ")}`)
-		}
-	}
-	for (const field of fields) {
-		if (field.kind !== "number") continue
-		const rawRangeOptions = field as { min?: number; max?: number; step?: number }
-		if (
-			field.values !== undefined &&
-			(rawRangeOptions.min !== undefined || rawRangeOptions.max !== undefined || rawRangeOptions.step !== undefined)
-		) {
-			throw new Error(`Number field ${field.key} cannot combine values with min, max, or step`)
-		}
-		if (!Number.isFinite(field.default)) throw new Error(`Number field ${field.key} default must be finite`)
-		if (field.values !== undefined) {
-			if (field.values.length === 0) throw new Error(`Number field ${field.key} values must have at least one value`)
-			for (const value of field.values) {
-				if (!Number.isFinite(value)) throw new Error(`Number field ${field.key} values must be finite`)
-			}
-			if (!field.values.includes(field.default)) {
-				throw new Error(`Number field ${field.key} default must be one of: ${field.values.join(", ")}`)
-			}
-			continue
-		}
-		if (field.min !== undefined && !Number.isFinite(field.min)) throw new Error(`Number field ${field.key} min must be finite`)
-		if (field.max !== undefined && !Number.isFinite(field.max)) throw new Error(`Number field ${field.key} max must be finite`)
-		if (field.step !== undefined && (!Number.isFinite(field.step) || field.step <= 0)) {
-			throw new Error(`Number field ${field.key} step must be a positive finite number`)
-		}
-		if (field.min !== undefined && field.max !== undefined && field.min > field.max) {
-			throw new Error(`Number field ${field.key} min must be less than or equal to max`)
-		}
-		if (field.min !== undefined && field.default < field.min) {
-			throw new Error(`Number field ${field.key} default must be at least ${field.min}`)
-		}
-		if (field.max !== undefined && field.default > field.max) {
-			throw new Error(`Number field ${field.key} default must be at most ${field.max}`)
-		}
-	}
-}
-
-function createFieldSchema(field: ScopedConfigField): ConfigFieldJsonSchema {
-	const description = field.description === undefined ? {} : { description: field.description }
-	switch (field.kind) {
-		case "enum":
+		if (field.kind === "enum") {
 			if (field.values.length === 0) throw new Error(`Enum field ${field.key} must have at least one value`)
-			return { type: "string", enum: [...field.values], default: field.default, ...description }
-		case "boolean":
-			return { type: "boolean", default: field.default, ...description }
-		case "string":
-			return { type: "string", default: field.default, ...description }
-		case "number":
-			if (field.values) {
-				return { type: "number", enum: [...field.values], default: field.default, ...description }
-			}
-			return {
-				type: "number",
-				default: field.default,
-				...description,
-				...(field.min === undefined ? {} : { minimum: field.min }),
-				...(field.max === undefined ? {} : { maximum: field.max })
-			}
+			if (!field.values.includes(field.default))
+				throw new Error(`Enum field ${field.key} default must be one of: ${field.values.join(", ")}`)
+		}
+		if (field.kind === "number") validateNumberField(field)
 	}
 }
 
-function validateConfigValue(field: ScopedConfigField, value: unknown): void {
-	switch (field.kind) {
-		case "enum":
-			if (typeof value !== "string" || !field.values.includes(value)) {
-				throw new Error(`/${field.key} must be one of: ${field.values.join(", ")}`)
-			}
-			return
-		case "boolean":
-			if (typeof value !== "boolean") throw new Error(`/${field.key} must be boolean`)
-			return
-		case "string":
-			if (typeof value !== "string") throw new Error(`/${field.key} must be string`)
-			return
-		case "number":
-			if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`/${field.key} must be number`)
-			return
+function validateNumberField(field: NumberConfigField & { key: string }): void {
+	const rawRangeOptions = field as { min?: number; max?: number; step?: number }
+	if (
+		field.values !== undefined &&
+		(rawRangeOptions.min !== undefined || rawRangeOptions.max !== undefined || rawRangeOptions.step !== undefined)
+	) {
+		throw new Error(`Number field ${field.key} cannot combine values with min, max, or step`)
 	}
+	if (!Number.isFinite(field.default)) throw new Error(`Number field ${field.key} default must be finite`)
+	if (field.values !== undefined) {
+		if (field.values.length === 0) throw new Error(`Number field ${field.key} values must have at least one value`)
+		for (const value of field.values) {
+			if (!Number.isFinite(value)) throw new Error(`Number field ${field.key} values must be finite`)
+		}
+		if (!field.values.includes(field.default))
+			throw new Error(`Number field ${field.key} default must be one of: ${field.values.join(", ")}`)
+		return
+	}
+	if (field.min !== undefined && !Number.isFinite(field.min)) throw new Error(`Number field ${field.key} min must be finite`)
+	if (field.max !== undefined && !Number.isFinite(field.max)) throw new Error(`Number field ${field.key} max must be finite`)
+	if (field.step !== undefined && (!Number.isFinite(field.step) || field.step <= 0)) {
+		throw new Error(`Number field ${field.key} step must be a positive finite number`)
+	}
+	if (field.min !== undefined && field.max !== undefined && field.min > field.max) {
+		throw new Error(`Number field ${field.key} min must be less than or equal to max`)
+	}
+	if (field.min !== undefined && field.default < field.min)
+		throw new Error(`Number field ${field.key} default must be at least ${field.min}`)
+	if (field.max !== undefined && field.default > field.max)
+		throw new Error(`Number field ${field.key} default must be at most ${field.max}`)
+}
+
+function createJsonSchema(fields: readonly ScopedConfigField[]): ConfigJsonSchema {
+	const properties: ConfigJsonSchema["properties"] = {}
+	for (const field of fields) {
+		properties[field.key] = {
+			type: field.kind === "enum" ? "string" : field.kind,
+			default: field.default,
+			...(field.description === undefined ? {} : { description: field.description }),
+			...(field.kind === "enum" || (field.kind === "number" && field.values) ? { enum: [...field.values] } : {}),
+			...(field.kind === "number" && field.min !== undefined ? { minimum: field.min } : {}),
+			...(field.kind === "number" && field.max !== undefined ? { maximum: field.max } : {})
+		}
+	}
+	return { type: "object", properties, additionalProperties: true }
+}
+
+function readConfigFile(path: string): ConfigPatch {
+	if (!existsSync(path)) return {}
+	try {
+		return parseConfigPatch(JSON.parse(readFileSync(path, "utf-8")))
+	} catch (error) {
+		throw new Error(`Invalid config at ${path}: ${formatConfigParseError(error)}`)
+	}
+}
+
+function parseConfigPatch(value: unknown): ConfigPatch {
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("must be an object")
+	const config: ConfigPatch = {}
+	for (const [key, fieldValue] of Object.entries(value)) {
+		if (fieldValue !== undefined) config[key] = fieldValue
+	}
+	return config
+}
+
+function writeConfigFile(path: string, config: ConfigPatch): void {
+	if (Object.keys(config).length === 0) {
+		rmSync(path, { force: true })
+		return
+	}
+	mkdirSync(dirname(path), { recursive: true })
+	writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, "utf-8")
+}
+
+function validateUpdateValue(field: ScopedConfigField, value: unknown): void {
+	const warning = getConfigValueWarning(field, value)
+	if (warning) throw new Error(warning.replace("; value is ignored while resolving", ""))
 }
 
 export function getConfigWarnings(fields: readonly ScopedConfigField[], config: object): ConfigWarning[] {
@@ -465,18 +376,42 @@ export function getConfigWarnings(fields: readonly ScopedConfigField[], config: 
 	return warnings
 }
 
+function getScopedWarnings(
+	fields: readonly ScopedConfigField[],
+	scoped: ScopedConfigPatch,
+	scopes: ConfigScopes,
+	path: (scope: ConfigScope, cwd: string) => string,
+	cwd: string
+): ScopedConfigWarning[] {
+	const warnings: ScopedConfigWarning[] = []
+	for (const scope of scopes) {
+		for (const warning of getConfigWarnings(fields, scoped[scope])) warnings.push({ ...warning, scope, path: path(scope, cwd) })
+	}
+	return warnings
+}
+
 function getConfigValueWarning(field: ScopedConfigField, value: unknown): string | undefined {
-	if (field.kind !== "number" || typeof value !== "number" || !Number.isFinite(value)) return undefined
-	if (field.values !== undefined && !field.values.includes(value)) {
-		return `/${field.key} should be one of: ${field.values.join(", ")}; value is ignored while resolving`
+	switch (field.kind) {
+		case "enum":
+			if (typeof value !== "string") return `/${field.key} must be string; value is ignored while resolving`
+			if (!field.values.includes(value))
+				return `/${field.key} should be one of: ${field.values.join(", ")}; value is ignored while resolving`
+			return undefined
+		case "boolean":
+			return typeof value === "boolean" ? undefined : `/${field.key} must be boolean; value is ignored while resolving`
+		case "string":
+			return typeof value === "string" ? undefined : `/${field.key} must be string; value is ignored while resolving`
+		case "number":
+			if (typeof value !== "number" || !Number.isFinite(value)) return `/${field.key} must be number; value is ignored while resolving`
+			if (field.values !== undefined && !field.values.includes(value)) {
+				return `/${field.key} should be one of: ${field.values.join(", ")}; value is ignored while resolving`
+			}
+			if (field.min !== undefined && value < field.min)
+				return `/${field.key} should be at least ${field.min}; value is ignored while resolving`
+			if (field.max !== undefined && value > field.max)
+				return `/${field.key} should be at most ${field.max}; value is ignored while resolving`
+			return undefined
 	}
-	if (field.min !== undefined && value < field.min) {
-		return `/${field.key} should be at least ${field.min}; value is ignored while resolving`
-	}
-	if (field.max !== undefined && value > field.max) {
-		return `/${field.key} should be at most ${field.max}; value is ignored while resolving`
-	}
-	return undefined
 }
 
 function defaultConfig(fields: readonly ScopedConfigField[]): Record<string, unknown> {
@@ -490,18 +425,6 @@ export function getConfigValue(config: object, key: string): unknown {
 }
 
 function formatConfigParseError(error: unknown): string {
-	const errors = error && typeof error === "object" ? (error as { errors?: unknown }).errors : undefined
-	if (Array.isArray(errors) && errors.length > 0) return errors.map(formatSchemaError).join("; ")
 	if (error instanceof Error && error.message) return error.message
 	return String(error)
-}
-
-function formatSchemaError(error: unknown): string {
-	if (!error || typeof error !== "object") return String(error)
-	const { instancePath, message: errorMessage, keyword } = error as { instancePath?: unknown; message?: unknown; keyword?: unknown }
-	const path = typeof instancePath === "string" && instancePath ? instancePath : "/"
-	let message = String(error)
-	if (typeof errorMessage === "string" && errorMessage) message = errorMessage
-	else if (typeof keyword === "string") message = `failed ${keyword}`
-	return `${path} ${message}`
 }
