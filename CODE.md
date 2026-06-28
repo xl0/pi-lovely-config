@@ -12,14 +12,17 @@ Core files:
 
 Public API:
 
-- `defineScopedConfig()` declares a flat keyed schema and fixed scoped storage.
+- `defineScopedConfig()` declares a flat keyed schema and returns a stateful config instance.
 - `field.enum()`, `field.boolean()`, `field.string()`, `field.number()` create fields.
-- `config.load(cwd)` loads scoped patches and returns `{ value, scoped, warnings }`.
-- `config.update(cwd, { scope, key, value })` writes one known key, reloads, and returns loaded config.
-- `config.resetScope(cwd, scope)` deletes all known keys in one scope, preserves unknown keys, reloads.
+- `config.load(cwd)` loads scoped patches into the config object.
+- `config.value`, `config.scoped`, and `config.warnings` hold current loaded state.
+- `config.update(scope, key, value)` writes one known key, reloads, and returns the config object.
+- `config.resetScope(scope)` deletes one scope config file and reloads.
 - `config.resolve(scoped)` merges defaults + active scopes without file IO.
-- `config.path(scope, cwd)`, `fields`, `defaults`, and `jsonSchema` are available for UI/debug.
+- `config.path(scope)`, `fields`, and `defaults` are available for UI/debug after load.
 - `ScopedConfigEditor` custom TUI component edits user/workspace scopes.
+- Implementation keeps the public API factory-based for type inference; runtime behavior lives on an internal `ScopedConfigImpl` class.
+- Root type exports are intentionally small: `ConfigFromSchema`, `ConfigScope`, and `ScopedConfig`.
 
 Schema model:
 
@@ -28,14 +31,13 @@ Schema model:
 - Supported fields: enum, boolean, string, number.
 - Field metadata: `description`, `valueDescriptions`, `depth`, `visibleWhen`.
 - Number fields support either range mode (`min` / `max` / `step`) or explicit `values`, not both.
-- Generated JSON Schema-like output includes defaults, descriptions, enum values, and number min/max.
 
 Scopes are fixed:
 
 - user: `~/.pi/agent/<fileName>`
 - workspace: `<cwd>/.pi/<fileName>`
 
-Specs default to `scope: "both"`, where workspace overrides user.
+Omitting `scope` enables both scopes, where workspace overrides user.
 Specs can restrict active scopes with `scope: "user"` or `scope: "workspace"`.
 Callers cannot configure scope order. Missing files read as empty config patches.
 
@@ -44,10 +46,10 @@ Validation / preservation:
 - Config file names must be plain file names, not paths.
 - Invalid JSON or non-object config files throw with path.
 - Raw scoped patches are untyped `Record<string, unknown>` because files may contain unknown or invalid values.
-- Unknown keys are preserved in scoped patches/files but ignored by resolved typed config.
+- Unknown keys are preserved by key updates and ignored by resolved typed config.
 - Invalid known values become warnings and are ignored while resolving.
 - `update()` only accepts known keys and valid values; manual invalid file values remain preserved.
-- Empty files are deleted only when no known or unknown properties remain.
+- Empty files are deleted.
 
 TUI notes:
 

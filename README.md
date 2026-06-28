@@ -3,8 +3,7 @@
 Scoped config helpers for Pi extension packages.
 
 Define a flat schema once. Get fixed user/workspace files, typed defaults,
-merge semantics, validation warnings, JSON Schema output, key updates, and an
-optional TUI editor.
+merge semantics, validation warnings, key updates, and an optional TUI editor.
 
 ## Quick start
 
@@ -23,14 +22,10 @@ const config = defineScopedConfig({
 	}
 })
 
-const loaded = config.load(process.cwd())
-console.log(loaded.value.mood, loaded.value.temperature)
+config.load(process.cwd())
+console.log(config.value.mood, config.value.temperature)
 
-config.update(process.cwd(), {
-	scope: "workspace",
-	key: "temperature",
-	value: 1.1
-})
+config.update("workspace", "temperature", 1.1)
 ```
 
 ## Model
@@ -42,8 +37,8 @@ Scopes are fixed:
 | User | `~/.pi/agent/<fileName>` |
 | Workspace | `<cwd>/.pi/<fileName>` |
 
-Default `scope` is `"both"`; workspace overrides user. Use `scope: "user"` or
-`scope: "workspace"` for single-scope configs.
+Omit `scope` to use both scopes; workspace overrides user. Use `scope: "user"`
+or `scope: "workspace"` for single-scope configs.
 
 Unknown keys are preserved in files but ignored by typed config resolution. This
 lets newer config files survive older app versions.
@@ -84,10 +79,10 @@ UI-only metadata:
 ## Runtime API
 
 ```ts
-const loaded = config.load(ctx.cwd)
+config.load(ctx.cwd)
 ```
 
-`loaded` contains:
+`config` now contains:
 
 - `value` — defaults-filled merged config
 - `scoped` — raw user/workspace patches, including unknown keys
@@ -96,51 +91,40 @@ const loaded = config.load(ctx.cwd)
 Update one key:
 
 ```ts
-const next = config.update(ctx.cwd, {
-	scope: "user",
-	key: "theme",
-	value: "dark"
-})
+config.update("user", "theme", "dark")
 ```
 
 Unset one key:
 
 ```ts
-config.update(ctx.cwd, {
-	scope: "workspace",
-	key: "theme",
-	value: undefined
-})
+config.update("workspace", "theme", undefined)
 ```
 
-Reset all known keys in one scope while preserving unknown keys:
+Delete one scope config file:
 
 ```ts
-config.resetScope(ctx.cwd, "workspace")
+config.resetScope("workspace")
 ```
 
 Other useful properties/methods:
 
 - `config.fields` — normalized field list for UI
 - `config.defaults`
-- `config.jsonSchema`
-- `config.path(scope, cwd)`
+- `config.path(scope)`
 - `config.resolve(scoped)`
 
 ## TUI editor
 
 ```ts
-const loaded = config.load(ctx.cwd)
+config.load(ctx.cwd)
 
 await ctx.ui.custom<void>((tui, theme, _keys, done) => {
 	return new ScopedConfigEditor({
 		tui,
 		theme,
-		ctx,
-		spec: config,
-		scoped: loaded.scoped,
-		onChange: value => {
-			ctx.ui.setStatus("vibes", `mood=${value.mood}`)
+		config,
+		onChange: config => {
+			ctx.ui.setStatus("vibes", `mood=${config.value.mood}`)
 		},
 		done
 	})
