@@ -127,7 +127,8 @@ export class ScopedConfigEditor<Config extends object> {
 		}
 		if (this.activeInput && (kb.matches(data, "tui.editor.cursorLeft") || kb.matches(data, "tui.editor.cursorRight"))) return false
 		if (kb.matches(data, "tui.editor.cursorRight")) {
-			if (!this.selectedFieldIsSet()) return true
+			const field = this.selectedField()
+			if (!field || getConfigValue(this.scoped[this.currentScope()], field.key) === undefined) return true
 			this.focusPart = "value"
 			this.tui.requestRender()
 			return true
@@ -138,11 +139,6 @@ export class ScopedConfigEditor<Config extends object> {
 		this.activeInput = undefined
 		this.tui.requestRender()
 		return true
-	}
-
-	private selectedFieldIsSet(): boolean {
-		const field = this.selectedField()
-		return !!field && getConfigValue(this.scoped[this.currentScope()], field.key) !== undefined
 	}
 
 	private handleActivationKey(data: string, kb: Keybindings, isSpace: boolean): boolean {
@@ -197,7 +193,11 @@ export class ScopedConfigEditor<Config extends object> {
 			const isSet = rawValue !== undefined
 			const include = `${isSet ? "[x]" : "[ ]"} `
 			const renderedInclude = this.theme.fg(selected && this.focusPart === "include" ? "accent" : "muted", include)
-			const value = this.renderFieldValue(this.scoped[scope], field, selected, width)
+			let value = formatScopedValue(this.scoped[scope], field)
+			if (selected && this.focusPart === "value" && this.activeInput) {
+				if (field.kind === "string") value = renderStringInput(this.activeInput, width)
+				else if (field.kind === "number" && !field.values) value = renderInput(this.activeInput, width)
+			}
 			const note = getScopeNote(scope, this.scopes, this.scoped, field)
 			const renderedNote = note ? ` ${this.theme.fg("muted", `(${note})`)}` : ""
 			const valueStyle = getFieldWarning(this.scoped[scope], field)
@@ -223,14 +223,6 @@ export class ScopedConfigEditor<Config extends object> {
 		else if (warning) addWrappedWithPrefix(lines, width, " ", this.theme.fg("warning", warning))
 		else if (valueDescription) addWrappedWithPrefix(lines, width, " ", this.theme.fg("muted", valueDescription))
 		else lines.push("")
-	}
-
-	private renderFieldValue(config: ConfigPatch, field: ScopedConfigField, selected: boolean, width: number): string {
-		if (selected && this.focusPart === "value" && this.activeInput) {
-			if (field.kind === "string") return renderStringInput(this.activeInput, width)
-			if (field.kind === "number" && !field.values) return renderInput(this.activeInput, width)
-		}
-		return formatScopedValue(config, field)
 	}
 
 	private renderActiveFieldDescription(lines: string[], width: number, fields: readonly ScopedConfigField[]): void {
