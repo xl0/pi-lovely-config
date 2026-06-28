@@ -262,7 +262,10 @@ class ScopedConfigImpl<Config extends object> implements ScopedConfig<Config> {
 	resetScope(scope: ConfigScope): ScopedConfig<Config> {
 		if (!this.scopes.includes(scope)) throw new Error(`Config scope is not active: ${scope}`)
 		const cwd = this.currentCwd()
-		rmSync(this.path(scope), { force: true })
+		const configPath = this.path(scope)
+		const patch = readConfigFile(configPath)
+		for (const field of this.fields) delete patch[field.key]
+		writeConfigFile(configPath, patch)
 		return this.load(cwd)
 	}
 
