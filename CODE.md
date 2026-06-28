@@ -53,6 +53,7 @@ Validation / preservation:
 
 TUI notes:
 
+- Editor uses left/right focus between include checkbox and value. Enter edits free-form values and cycles discrete values; Space toggles include or quick-steps free-form numbers. Enter accepts input and exits edit mode.
 - `visibleWhen` is UI-only; hidden saved values stay in config until cleared/reset.
 - Inline input Esc closes editor when input matches persisted state; otherwise it reverts.
 - Ranged number inputs reject out-of-range values on commit.
@@ -62,7 +63,7 @@ TUI notes:
 
 `extensions/scoped-config-demo.ts` registers `/scoped-config-demo`.
 
-It opens `ScopedConfigEditor` in TUI mode, showing enum, boolean, string, ranged number, valued number, nested, and conditional fields. It updates footer status with effective values after edits. Non-TUI mode reports effective values via notification. Demo always uses both scopes.
+It opens `ScopedConfigEditor` in TUI mode, showing ranged number, enum, boolean, string, valued number, nested, and conditional fields. It updates footer status with effective values after edits. Non-TUI mode reports effective values via notification. Demo always uses both scopes.
 
 ## Tooling
 

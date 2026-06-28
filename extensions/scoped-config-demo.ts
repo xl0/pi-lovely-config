@@ -2,6 +2,13 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import { defineScopedConfig, field, ScopedConfigEditor } from "../src/index"
 
 const demoSchema = {
+	temperature: field.number(0.7, {
+		label: "Temperature",
+		description: "Number field with min, max, and step. Space steps through values; direct edit accepts numbers",
+		min: 0,
+		max: 2,
+		step: 0.1
+	}),
 	theme: field.enum(["system", "light", "dark", "unset"], "system", {
 		label: "Theme",
 		description: "Cycles an enum value. Workspace overrides user when both scopes are active",
@@ -23,13 +30,6 @@ const demoSchema = {
 	signature: field.string("sent from pi", {
 		label: "Signature",
 		description: "String field. Use the include toggle to unset the value"
-	}),
-	temperature: field.number(0.7, {
-		label: "Temperature",
-		description: "Number field with min, max, and step. Space steps through values; direct edit accepts numbers",
-		min: 0,
-		max: 2,
-		step: 0.1
 	}),
 	retries: field.number(1, {
 		label: "Retries",
