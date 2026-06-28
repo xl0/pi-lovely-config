@@ -1,4 +1,4 @@
-import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent"
+import type { Theme } from "@earendil-works/pi-coding-agent"
 import {
 	CURSOR_MARKER,
 	getKeybindings,
@@ -9,22 +9,20 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi
 } from "@earendil-works/pi-tui"
-import type { ConfigPatch, ConfigScope, ResolvedConfig, ScopedConfig, ScopedConfigField, ScopedConfigPatch } from "./config"
-import { getConfigValue, getConfigWarnings } from "./config"
+import type { ConfigPatch, ConfigScope, ScopedConfig, ScopedConfigField, ScopedConfigPatch } from "./config"
+import { getConfigWarnings } from "./config"
 
 type RenderTui = { requestRender(): void }
 type Keybindings = ReturnType<typeof getKeybindings>
 
-type ScopedConfigChangeHandler<Config extends object> = (resolved: ResolvedConfig<Config>, scoped: ScopedConfigPatch) => void
+type ScopedConfigChangeHandler<Config extends object> = (config: ScopedConfig<Config>) => void
 type FocusPart = "include" | "value"
 type NumberInputParseResult = { ok: true; value: number } | { ok: false; message: string }
 
 export class ScopedConfigEditor<Config extends object> {
-	private scoped: ScopedConfigPatch
 	private readonly tui: RenderTui
 	private readonly theme: Theme
-	private readonly ctx: ExtensionContext
-	private readonly spec: ScopedConfig<Config>
+	private readonly config: ScopedConfig<Config>
 	private readonly onChange: ScopedConfigChangeHandler<Config>
 	private readonly fields: readonly ScopedConfigField[]
 	private readonly scopes: readonly ConfigScope[]
@@ -40,21 +38,21 @@ export class ScopedConfigEditor<Config extends object> {
 	constructor(options: {
 		tui: RenderTui
 		theme: Theme
-		ctx: ExtensionContext
-		spec: ScopedConfig<Config>
-		scoped: ScopedConfigPatch
+		config: ScopedConfig<Config>
 		onChange: ScopedConfigChangeHandler<Config>
 		done: (result: undefined) => void
 	}) {
 		this.tui = options.tui
 		this.theme = options.theme
-		this.ctx = options.ctx
-		this.spec = options.spec
+		this.config = options.config
 		this.onChange = options.onChange
-		this.fields = options.spec.fields
-		this.scopes = options.spec.scopes
-		this.scoped = options.scoped
+		this.fields = options.config.fields
+		this.scopes = options.config.scopes
 		this.done = options.done
+	}
+
+	private get scoped(): ScopedConfigPatch {
+		return this.config.scoped
 	}
 
 	render(width: number): string[] {
@@ -221,7 +219,7 @@ export class ScopedConfigEditor<Config extends object> {
 		const scope = this.scopes[this.currentTab]
 		if (!scope) return
 
-		const path = this.spec.path(scope, this.ctx.cwd)
+		const path = this.config.path(scope)
 		addWrappedWithPrefix(
 			lines,
 			width,
@@ -305,7 +303,7 @@ export class ScopedConfigEditor<Config extends object> {
 			scoped[configScope] = this.scoped[configScope]
 			if (configScope === scope) break
 		}
-		return this.spec.resolve(scoped)
+		return this.config.resolve(scoped)
 	}
 
 	private visibleFields(scope: ConfigScope = this.currentScope()): ScopedConfigField[] {
@@ -529,20 +527,14 @@ export class ScopedConfigEditor<Config extends object> {
 	private saveValue(scope: ConfigScope, field: ScopedConfigField, value: unknown): void {
 		this.activeInputError = undefined
 		this.activeInputWarning = undefined
-		const loaded = this.spec.update(this.ctx.cwd, {
-			scope,
-			key: field.key as keyof Config & string,
-			value: value as Config[keyof Config & string] | undefined
-		})
-		this.scoped = loaded.scoped
-		this.onChange(loaded.value, loaded.scoped)
+		this.config.update(scope, field.key as keyof Config & string, value as Config[keyof Config & string] | undefined)
+		this.onChange(this.config)
 		this.refresh()
 	}
 
 	private reset(scope: ConfigScope): void {
-		const loaded = this.spec.resetScope(this.ctx.cwd, scope)
-		this.scoped = loaded.scoped
-		this.onChange(loaded.value, loaded.scoped)
+		this.config.resetScope(scope)
+		this.onChange(this.config)
 		this.refresh()
 	}
 }
@@ -571,6 +563,10 @@ function isFieldVisible(
 		get: key => resolved[key],
 		getScoped: (key, targetScope = scope) => getConfigValue(configs[targetScope], key)
 	})
+}
+
+function getConfigValue(config: object, key: string): unknown {
+	return (config as Record<string, unknown>)[key]
 }
 
 function fieldUsesInput(field: ScopedConfigField): boolean {

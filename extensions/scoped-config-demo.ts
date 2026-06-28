@@ -82,8 +82,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("scoped-config-demo", {
 		description: "Open scoped config demo",
 		handler: async (_args, ctx) => {
-			const loaded = demoConfig.load(ctx.cwd)
-			let value = loaded.value
+			demoConfig.load(ctx.cwd)
 			const format = (config: typeof demoConfig.defaults) =>
 				[
 					`theme=${config.theme}`,
@@ -96,26 +95,23 @@ export default function (pi: ExtensionAPI) {
 					`experiment=${config.experimentMode}`
 				].join(" ")
 
-			if (loaded.warnings.length > 0) {
-				ctx.ui.notify(loaded.warnings.map(warning => `${warning.path}: ${warning.message}`).join("\n"), "warning")
+			if (demoConfig.warnings.length > 0) {
+				ctx.ui.notify(demoConfig.warnings.map(warning => `${warning.path}: ${warning.message}`).join("\n"), "warning")
 			}
 
 			await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
 				return new ScopedConfigEditor({
 					tui,
 					theme,
-					ctx,
-					spec: demoConfig,
-					scoped: loaded.scoped,
-					onChange: nextValue => {
-						value = nextValue
-						ctx.ui.setStatus("scoped-config-demo", format(value))
+					config: demoConfig,
+					onChange: config => {
+						ctx.ui.setStatus("scoped-config-demo", format(config.value))
 					},
 					done
 				})
 			})
 
-			ctx.ui.setStatus("scoped-config-demo", format(value))
+			ctx.ui.setStatus("scoped-config-demo", format(demoConfig.value))
 		}
 	})
 }
