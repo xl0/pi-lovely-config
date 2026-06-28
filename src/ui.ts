@@ -207,12 +207,8 @@ export class ScopedConfigEditor<Config extends object> {
 					: selected && this.focusPart === "value"
 						? "accent"
 						: "text"
-			addWrappedWithPrefix(
-				lines,
-				width,
-				prefix,
-				`${renderedInclude}${this.theme.fg("text", field.label)}  ${this.theme.fg(valueStyle, value)}${renderedNote}`
-			)
+			const renderedValue = !isSet && note ? "" : ` ${this.theme.fg(valueStyle, value)}`
+			addWrappedWithPrefix(lines, width, prefix, `${renderedInclude}${this.theme.fg("text", field.label)}${renderedValue}${renderedNote}`)
 		}
 		this.renderResetRow(lines, width, this.isResetSelected(fields))
 	}
@@ -557,32 +553,22 @@ function getScopeNote(
 	configs: ScopedConfigPatch,
 	field: ScopedConfigField
 ): string | undefined {
+	const value = getConfigValue(configs[scope], field.key)
 	const userValue = getConfigValue(configs.user, field.key)
 	const workspaceValue = getConfigValue(configs.workspace, field.key)
-	const userWarning = userValue === undefined ? undefined : getFieldValueWarning(field, userValue)
-	const workspaceWarning = workspaceValue === undefined ? undefined : getFieldValueWarning(field, workspaceValue)
-	const user = userValue === undefined || userWarning ? undefined : formatFieldValue(field, userValue)
-	const workspace = workspaceValue === undefined || workspaceWarning ? undefined : formatFieldValue(field, workspaceValue)
+	const user = userValue === undefined || getFieldValueWarning(field, userValue) ? undefined : formatFieldValue(field, userValue)
+	const workspace =
+		workspaceValue === undefined || getFieldValueWarning(field, workspaceValue) ? undefined : formatFieldValue(field, workspaceValue)
 	const defaultValue = formatFieldValue(field, field.default)
-	const prefix = scope === "user" ? (userWarning ? "ignored; " : "") : workspaceWarning ? "ignored; " : ""
-	if (scopes.length === 1) {
-		const value = scope === "user" ? user : workspace
-		return `${prefix}${value === undefined ? `uses default: ${defaultValue}` : `overrides default: ${defaultValue}`}`
+
+	if (value !== undefined) {
+		if (getFieldValueWarning(field, value)) return undefined
+		return scope === "user" && scopes.includes("workspace") && workspace !== undefined ? `Workspace: ${workspace}` : undefined
 	}
 
-	if (user === undefined && workspace === undefined) return `${prefix}uses default: ${defaultValue}`
-
-	if (scope === "user") {
-		if (user !== undefined && workspace !== undefined) return `${prefix}Workspace overrides with: ${workspace}`
-		if (user === undefined && workspace !== undefined) return `${prefix}Workspace sets: ${workspace}`
-		return undefined
-	}
-
-	if (workspace === undefined && user !== undefined) return `${prefix}inherits User: ${user}`
-	if (workspace !== undefined && user !== undefined)
-		return `${prefix}${workspace === user ? `same as User: ${user}` : `overrides User: ${user}`}`
-	if (workspace !== undefined && user === undefined) return `${prefix}overrides default: ${defaultValue}`
-	return undefined
+	if (scope === "user" && scopes.includes("workspace") && workspace !== undefined) return `Workspace: ${workspace}`
+	if (scope === "workspace" && scopes.includes("user") && user !== undefined) return `User: ${user}`
+	return `default: ${defaultValue}`
 }
 
 function scopeLabel(scope: ConfigScope): string {

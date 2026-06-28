@@ -54,8 +54,9 @@ Validation / preservation:
 TUI notes:
 
 - Editor uses left/right focus between include checkbox and value. Enter edits free-form values and cycles discrete values; Space toggles include or quick-steps free-form numbers. Enter accepts input and exits edit mode.
+- Scope notes show compact default/user/workspace source values where relevant.
 - `visibleWhen` is UI-only; hidden saved values stay in config until cleared/reset.
-- Inline input Esc closes editor when input matches persisted state; otherwise it reverts.
+- Inline input Esc exits edit mode and discards uncommitted input.
 - Ranged number inputs reject out-of-range values on commit.
 - Manual invalid values show warnings and are ignored by resolution until corrected.
 
