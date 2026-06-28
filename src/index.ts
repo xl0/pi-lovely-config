@@ -1,9 +1,17 @@
 export type {
-	ConfigFromFields,
+	ConfigField,
+	ConfigFromSchema,
+	ConfigJsonSchema,
+	ConfigPatch,
+	ConfigSchema,
 	ConfigScope,
 	ConfigScopeMode,
+	LoadedConfig,
+	ResolvedConfig,
+	ScopedConfig,
 	ScopedConfigField,
-	ScopedConfigSpec
+	ScopedConfigPatch,
+	ScopedConfigWarning
 } from "./config"
-export { createScopedConfigSchema, defineScopedConfigSpec, getConfigWarnings, ScopedConfigState } from "./config"
+export { defineScopedConfig, field } from "./config"
 export { ScopedConfigEditor } from "./ui"

@@ -2,90 +2,38 @@
 
 Scoped config helpers for Pi extension packages.
 
-Define config once. Get fixed user/workspace files, typed defaults, merge semantics,
-validation, warnings, schema, and optional TUI editor.
+Define a flat schema once. Get fixed user/workspace files, typed defaults,
+merge semantics, validation warnings, JSON Schema output, key updates, and an
+optional TUI editor.
 
-**Key capabilities:**
-- **Scoped config** — user file plus workspace override
-- **Typed fields** — enum, boolean, string, number
-- **Resolved state** — defaults-filled effective config
-- **Soft numeric warnings** — bad number values warn, load, and stay editable
-- **TUI editor** — edit both scopes with one component
-- **Schema output** — derive small plain JSON Schema-like object
-
-## Table of Contents
-
-- [Quick Start](#quick-start)
-- [Purpose](#purpose)
-- [How it works](#how-it-works)
-- [Config model](#config-model)
-- [API overview](#api-overview)
-- [Defining config](#defining-config)
-- [Runtime flow](#runtime-flow)
-- [TUI editor](#tui-editor)
-- [Schema and validation](#schema-and-validation)
-- [Example](#example)
-- [Related projects](#related-projects)
-
-## Quick Start
-
-Install:
-
-```bash
-bun add @xl0/pi-lovely-config
-```
-
-Minimal setup:
+## Quick start
 
 ```ts
 import {
-	defineScopedConfigSpec,
-	ScopedConfigState,
-	type ScopedConfigField
+	defineScopedConfig,
+	field
 } from "@xl0/pi-lovely-config"
 
-const fields = [
-	{ key: "theme", label: "Theme", kind: "enum", values: ["system", "light", "dark"], default: "system" },
-	{ key: "temperature", label: "Temperature", kind: "number", min: 0, max: 2, step: 0.1, default: 0.7 }
-] as const satisfies readonly ScopedConfigField[]
-
-const spec = defineScopedConfigSpec({
-	fileName: "my-extension.json",
-	fields
+const config = defineScopedConfig({
+	fileName: "vibes.json",
+	schema: {
+		mood: field.enum(["calm", "spicy", "feral"], "calm"),
+		temperature: field.number(0.7, { min: 0, max: 2, step: 0.1 }),
+		signature: field.string("sent from pi")
+	}
 })
 
-const state = new ScopedConfigState(spec)
-const config = state.load(process.cwd())
+const loaded = config.load(process.cwd())
+console.log(loaded.value.mood, loaded.value.temperature)
 
-console.log(config.theme, config.temperature)
+config.update(process.cwd(), {
+	scope: "workspace",
+	key: "temperature",
+	value: 1.1
+})
 ```
 
-## Purpose
-
-Pi extensions often need few knobs, but knobs live in two places:
-
-- user preference in `~/.pi/agent/<fileName>`
-- workspace override in `<cwd>/.pi/<fileName>`
-
-This lib keeps that machinery out of extension code.
-
-Use it when extension needs:
-
-- typed defaults
-- user/workspace layering
-- load/save helpers
-- soft warnings for bad numeric values
-- optional TUI editing
-
-## How it works
-
-1. Declare fields once with `defineScopedConfigSpec()`.
-2. Library derives defaults, schema, fixed paths, validation, merge order.
-3. Load scoped patches with `loadScoped()` or effective config with `load()`.
-4. Keep in-memory state with `ScopedConfigState`.
-5. In TUI, pass spec + scoped state into `ScopedConfigEditor`.
-
-## Config model
+## Model
 
 Scopes are fixed:
 
@@ -94,269 +42,112 @@ Scopes are fixed:
 | User | `~/.pi/agent/<fileName>` |
 | Workspace | `<cwd>/.pi/<fileName>` |
 
-Merge semantics:
+Default `scope` is `"both"`; workspace overrides user. Use `scope: "user"` or
+`scope: "workspace"` for single-scope configs.
 
-- default `scope` is `"both"`
-- workspace overrides user
-- `scope` can be `"user"`, `"workspace"`, or `"both"`
-- callers cannot change scope order
-- missing files load as empty patches
+Unknown keys are preserved in files but ignored by typed config resolution. This
+lets newer config files survive older app versions.
 
-## API overview
+Invalid known values are warnings and are ignored while resolving. Invalid JSON
+or non-object config files still throw.
 
-Core exports:
+## Schema
 
-- `defineScopedConfigSpec()` — declare config once
-- `ScopedConfigState` — hold scoped + resolved state in memory
-- `ScopedConfigEditor` — edit both scopes in TUI
-- `createScopedConfigSchema()` — derive plain JSON Schema-like shape
-- `getConfigWarnings()` — standalone numeric warnings helper
-
-Useful types:
-
-- `ScopedConfigField`
-- `ScopedConfigSpec`
-- `ConfigFromFields`
-- `ConfigScope`
-- `ConfigScopeMode`
-
-## Defining config
-
-Supported fields:
-
-- `enum`
-- `boolean`
-- `string`
-- `number`
-
-Field features:
-
-- `description` — field help text
-- `valueDescriptions` — per-value help text in editor
-- `depth` — visual indentation for nested rows
-- `visibleWhen` — UI-only conditional visibility
-
-Number fields support one of:
-
-- range mode: `min` / `max` / `step`
-- explicit values: `values`
-
-Not both.
-
-Example:
+Use field builders:
 
 ```ts
-const fields = [
-	{
-		key: "theme",
-		label: "Theme",
-		kind: "enum",
-		values: ["system", "light", "dark"],
-		default: "system"
-	},
-	{
-		key: "compactMode",
-		label: "Compact mode",
-		kind: "boolean",
-		default: false
-	},
-	{
-		key: "signature",
-		label: "Signature",
-		kind: "string",
-		default: "sent from pi"
-	},
-	{
-		key: "temperature",
-		label: "Temperature",
-		kind: "number",
-		min: 0,
-		max: 2,
-		step: 0.1,
-		default: 0.7
+const config = defineScopedConfig({
+	fileName: "my-extension.json",
+	schema: {
+		theme: field.enum(["system", "light", "dark"], "system", {
+			label: "Theme",
+			description: "Preferred theme"
+		}),
+		compact: field.boolean(false),
+		signature: field.string("sent from pi"),
+		temperature: field.number(0.7, { min: 0, max: 2, step: 0.1 }),
+		retries: field.number(1, { values: [0, 1, 2, 3] })
 	}
-] as const satisfies readonly ScopedConfigField[]
-```
-
-## Runtime flow
-
-Load raw scoped patches:
-
-```ts
-const scoped = spec.loadScoped(ctx.cwd)
-```
-
-Resolve effective config:
-
-```ts
-const config = spec.resolve(scoped)
-// or
-const config = spec.load(ctx.cwd)
-```
-
-Keep state in memory:
-
-```ts
-const state = new ScopedConfigState(spec)
-state.loadScoped(ctx.cwd)
-const resolved = state.getResolved()
-```
-
-Write one scope explicitly:
-
-```ts
-spec.saveFile(spec.getPath("workspace", ctx.cwd), {
-	temperature: 1.1
 })
 ```
 
-If known-field values become empty and no unknown properties remain, file is deleted.
+Supported fields: enum, boolean, string, number.
+
+UI-only metadata:
+
+- `label`
+- `description`
+- `valueDescriptions`
+- `depth`
+- `visibleWhen`
+
+## Runtime API
+
+```ts
+const loaded = config.load(ctx.cwd)
+```
+
+`loaded` contains:
+
+- `value` — defaults-filled merged config
+- `scoped` — raw user/workspace patches, including unknown keys
+- `warnings` — invalid known values by scope/path
+
+Update one key:
+
+```ts
+const next = config.update(ctx.cwd, {
+	scope: "user",
+	key: "theme",
+	value: "dark"
+})
+```
+
+Unset one key:
+
+```ts
+config.update(ctx.cwd, {
+	scope: "workspace",
+	key: "theme",
+	value: undefined
+})
+```
+
+Reset all known keys in one scope while preserving unknown keys:
+
+```ts
+config.resetScope(ctx.cwd, "workspace")
+```
+
+Other useful properties/methods:
+
+- `config.fields` — normalized field list for UI
+- `config.defaults`
+- `config.jsonSchema`
+- `config.path(scope, cwd)`
+- `config.resolve(scoped)`
 
 ## TUI editor
 
-Use `ScopedConfigEditor` inside `ctx.ui.custom()`:
-
 ```ts
-await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
+const loaded = config.load(ctx.cwd)
+
+await ctx.ui.custom<void>((tui, theme, _keys, done) => {
 	return new ScopedConfigEditor({
 		tui,
 		theme,
 		ctx,
-		spec,
-		scoped,
-		onChange: (_resolved, nextScoped) => {
-			state.setScoped(nextScoped)
+		spec: config,
+		scoped: loaded.scoped,
+		onChange: value => {
+			ctx.ui.setStatus("vibes", `mood=${value.mood}`)
 		},
 		done
 	})
 })
 ```
 
-Editor behavior:
-
-- tab switches scope
-- workspace/user tabs show whether scope file is set
-- string fields edit inline
-- ranged number fields step or accept direct numeric input
-- value-list number fields cycle through allowed values
-- hidden fields stay saved; `visibleWhen` affects UI only
-
-## Schema and validation
-
-`createScopedConfigSchema()` returns small plain JSON Schema-like object with:
-
-- `type: "object"`
-- `properties`
-- `additionalProperties: true`
-- field `default`
-- field `description`
-- enum `enum`
-- number `minimum` / `maximum`
-
-Validation rules:
-
-- invalid JSON or wrong known-field types throw with file path
-- unknown properties are preserved across load/save
-- numeric range/value mismatches are soft warnings, not fatal
-- warned numeric values are ignored while resolving, so lower-scope/default wins
-
-Warnings are available from:
-
-- `spec.getWarnings(config)`
-- `spec.getScopedWarnings(scoped, cwd)`
-- `getConfigWarnings(fields, config)`
-
-## Example
-
-Tiny extension with mood, heat, signature. User sets baseline taste. Workspace can
-turn one repo feral.
-
-```ts
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
-import {
-	defineScopedConfigSpec,
-	ScopedConfigEditor,
-	ScopedConfigState,
-	type ScopedConfigField
-} from "@xl0/pi-lovely-config"
-
-const fields = [
-	{
-		key: "mood",
-		label: "Mood",
-		kind: "enum",
-		values: ["calm", "spicy", "feral"],
-		valueDescriptions: {
-			calm: "Measured, boring, safe",
-			spicy: "Sharp edges, fun risk",
-			feral: "No promises"
-		},
-		default: "calm"
-	},
-	{
-		key: "temperature",
-		label: "Temperature",
-		kind: "number",
-		min: 0,
-		max: 2,
-		step: 0.1,
-		default: 0.7
-	},
-	{
-		key: "signature",
-		label: "Signature",
-		kind: "string",
-		default: "sent from bat cave"
-	}
-] as const satisfies readonly ScopedConfigField[]
-
-const spec = defineScopedConfigSpec({
-	fileName: "vibes.json",
-	fields
-})
-
-const state = new ScopedConfigState(spec)
-
-export default function (pi: ExtensionAPI) {
-	pi.registerCommand("vibes", {
-		description: "Edit or print scoped vibes config",
-		handler: async (_args, ctx) => {
-			const scoped = state.loadScoped(ctx.cwd)
-			const warnings = spec.getScopedWarnings(scoped, ctx.cwd)
-			if (warnings.length > 0) {
-				ctx.ui.notify(warnings.map(w => `${w.path}: ${w.message}`).join("\n"), "warning")
-			}
-
-			if (ctx.mode !== "tui") {
-				const config = state.getResolved()
-				ctx.ui.notify(`mood=${config.mood} temp=${config.temperature} sig=${config.signature}`, "info")
-				return
-			}
-
-			await ctx.ui.custom<void>((tui, theme, _keys, done) => {
-				return new ScopedConfigEditor({
-					tui,
-					theme,
-					ctx,
-					spec,
-					scoped,
-					onChange: (_resolved, nextScoped) => {
-						state.setScoped(nextScoped)
-					},
-					done
-				})
-			})
-		}
-	})
-}
-```
-
-Result:
-
-- user file sets baseline vibe
-- workspace file overrides it for repo
-- editor shows both scopes
-- `state.getResolved()` gives final effective config
+Editor writes via `update()` / `resetScope()`, then reloads merged config.
 
 ## Related projects
 
