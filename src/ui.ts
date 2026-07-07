@@ -1,6 +1,7 @@
 import type { Theme } from "@earendil-works/pi-coding-agent"
 import {
 	CURSOR_MARKER,
+	fuzzyFilter,
 	getKeybindings,
 	Input,
 	Key,
@@ -18,6 +19,8 @@ type Keybindings = ReturnType<typeof getKeybindings>
 type ScopedConfigChangeHandler<Config extends object> = (config: ScopedConfig<Config>) => void
 type FocusPart = "include" | "value"
 type NumberInputParseResult = { ok: true; value: number } | { ok: false; message: string }
+type EnumField = Extract<ScopedConfigField, { kind: "enum" }>
+type EnumSearchState = { input: Input; fieldKey: string; selectedIndex: number }
 
 export class ScopedConfigEditor<Config extends object> {
 	private readonly tui: RenderTui
@@ -28,6 +31,7 @@ export class ScopedConfigEditor<Config extends object> {
 	private readonly scopes: readonly ConfigScope[]
 	private readonly done: (result: undefined) => void
 	private activeInput: Input | undefined
+	private activeEnumSearch: EnumSearchState | undefined
 	private activeInputError: string | undefined
 	private focusPart: FocusPart = "value"
 	private currentTab = 0
@@ -96,8 +100,9 @@ export class ScopedConfigEditor<Config extends object> {
 			this.done(undefined)
 			return true
 		}
-		if (this.activeInput && kb.matches(data, "tui.select.cancel")) {
+		if ((this.activeInput || this.activeEnumSearch) && kb.matches(data, "tui.select.cancel")) {
 			this.activeInput = undefined
+			this.activeEnumSearch = undefined
 			this.activeInputError = undefined
 			this.tui.requestRender()
 			return true
@@ -110,6 +115,17 @@ export class ScopedConfigEditor<Config extends object> {
 	}
 
 	private handleNavigationKey(data: string, kb: Keybindings): boolean {
+		if (this.activeEnumSearch) {
+			if (kb.matches(data, "tui.select.up")) {
+				this.moveEnumSearchSelection(-1)
+				return true
+			}
+			if (kb.matches(data, "tui.select.down")) {
+				this.moveEnumSearchSelection(1)
+				return true
+			}
+			return false
+		}
 		if (kb.matches(data, "tui.select.up")) {
 			if (!this.commitActiveInput()) return true
 			this.moveRow(-1)
@@ -151,6 +167,8 @@ export class ScopedConfigEditor<Config extends object> {
 			if (field && this.focusPart === "include") this.toggleField(this.currentScope(), field)
 			else if (field?.kind === "number" && !field.values)
 				this.saveValue(this.currentScope(), field, nextNumberValue(field, getConfigValue(this.scoped[this.currentScope()], field.key)))
+			else if (field?.kind === "enum" && field.search)
+				this.saveValue(this.currentScope(), field, nextFieldValue(this.scoped[this.currentScope()], field))
 			else if (field?.kind !== "string") this.activateRow()
 			else if (this.isResetSelected()) this.reset(this.currentScope())
 			return true
@@ -198,6 +216,9 @@ export class ScopedConfigEditor<Config extends object> {
 				if (field.kind === "string") value = renderStringInput(this.activeInput, width)
 				else if (field.kind === "number" && !field.values) value = renderInput(this.activeInput, width)
 			}
+			if (selected && this.focusPart === "value" && this.activeEnumSearch?.fieldKey === field.key) {
+				value = renderInput(this.activeEnumSearch.input, width)
+			}
 			const note = getScopeNote(scope, this.scopes, this.scoped, field)
 			const renderedNote = note ? ` ${this.theme.fg("muted", `(${note})`)}` : ""
 			const valueStyle = getFieldWarning(this.scoped[scope], field)
@@ -209,15 +230,45 @@ export class ScopedConfigEditor<Config extends object> {
 						: "text"
 			const renderedValue = !isSet && note ? "" : ` ${this.theme.fg(valueStyle, value)}`
 			addWrappedWithPrefix(lines, width, prefix, `${renderedInclude}${this.theme.fg("text", field.label)}${renderedValue}${renderedNote}`)
+			if (selected)
+				this.renderEnumSearch(lines, width, field, " ".repeat(visibleWidth(prefix) + visibleWidth(include) + visibleWidth(field.label) + 1))
 		}
 		this.renderResetRow(lines, width, this.isResetSelected(fields))
+	}
+
+	private renderEnumSearch(lines: string[], width: number, field: ScopedConfigField, indent: string): void {
+		const state = this.activeEnumSearch
+		if (!state || field?.kind !== "enum" || field.key !== state.fieldKey) return
+
+		const values = enumSearchValues(field, state.input.getValue())
+		if (values.length === 0) {
+			addWrappedWithPrefix(lines, width, indent, this.theme.fg("muted", "No matching values"))
+			return
+		}
+
+		const maxVisible = 8
+		const startIndex = Math.max(0, Math.min(state.selectedIndex - Math.floor(maxVisible / 2), values.length - maxVisible))
+		const endIndex = Math.min(startIndex + maxVisible, values.length)
+		for (let index = startIndex; index < endIndex; index++) {
+			const value = values[index] ?? ""
+			const selected = index === state.selectedIndex
+			const prefix = `${indent}${this.theme.fg(selected ? "accent" : "muted", selected ? "> " : "  ")}`
+			const description = field.valueDescriptions?.[value]
+			const renderedValue = this.theme.fg(selected ? "accent" : "text", value)
+			const renderedDescription = description ? ` ${this.theme.fg("muted", description)}` : ""
+			addWrappedWithPrefix(lines, width, prefix, `${renderedValue}${renderedDescription}`)
+		}
+
+		if (startIndex > 0 || endIndex < values.length) {
+			addWrappedWithPrefix(lines, width, indent, this.theme.fg("muted", `(${state.selectedIndex + 1}/${values.length})`))
+		}
 	}
 
 	private renderActiveValueDescription(lines: string[], width: number, scope: ConfigScope, fields: readonly ScopedConfigField[]): void {
 		const field = this.selectedField(fields)
 		const error = this.activeInput ? this.activeInputError : undefined
 		const warning = field ? getFieldWarning(this.scoped[scope], field) : undefined
-		const valueDescription = field ? getValueDescription(this.scoped[scope], field) : undefined
+		const valueDescription = field && !this.activeEnumSearch ? getValueDescription(this.scoped[scope], field) : undefined
 		lines.push("")
 		if (error) addWrappedWithPrefix(lines, width, " ", this.theme.fg("error", error))
 		else if (warning) addWrappedWithPrefix(lines, width, " ", this.theme.fg("warning", warning))
@@ -278,11 +329,16 @@ export class ScopedConfigEditor<Config extends object> {
 
 	private refresh(): void {
 		this.currentRow = Math.min(this.currentRow, this.rowCount() - 1)
+		if (this.activeEnumSearch && this.selectedField()?.key !== this.activeEnumSearch.fieldKey) this.activeEnumSearch = undefined
 		this.updateFocus()
 		this.tui.requestRender()
 	}
 
 	private updateFocus(): void {
+		if (this.activeEnumSearch) {
+			this.focusPart = "value"
+			return
+		}
 		const field = this.selectedField()
 		this.focusPart = field && getConfigValue(this.scoped[this.currentScope()], field.key) === undefined ? "include" : "value"
 	}
@@ -310,6 +366,7 @@ export class ScopedConfigEditor<Config extends object> {
 		else if (getConfigValue(this.scoped[scope], field.key) === undefined) this.saveValue(scope, field, field.default)
 		else if (field.kind === "number" && field.values)
 			this.saveValue(scope, field, nextNumberValue(field, getConfigValue(this.scoped[scope], field.key)))
+		else if (field.kind === "enum" && field.search) this.startEnumSearch(field)
 		else if (fieldUsesInput(field)) this.startInput(field)
 		else this.saveValue(scope, field, nextFieldValue(this.scoped[scope], field))
 	}
@@ -323,6 +380,7 @@ export class ScopedConfigEditor<Config extends object> {
 
 	private startInput(field: ScopedConfigField, initial?: string): void {
 		if (!fieldUsesInput(field)) return
+		this.activeEnumSearch = undefined
 		const value = initial ?? getConfigValue(this.scoped[this.currentScope()], field.key)
 		const input = new Input()
 		input.setValue(typeof value === "string" || typeof value === "number" ? String(value) : "")
@@ -332,7 +390,21 @@ export class ScopedConfigEditor<Config extends object> {
 		this.tui.requestRender()
 	}
 
+	private startEnumSearch(field: EnumField): void {
+		if (!field.search) return
+		const input = new Input()
+		input.focused = true
+		const value = getConfigValue(this.scoped[this.currentScope()], field.key)
+		const selectedIndex = typeof value === "string" ? Math.max(0, field.values.indexOf(value)) : 0
+		this.activeInput = undefined
+		this.activeInputError = undefined
+		this.activeEnumSearch = { input, fieldKey: field.key, selectedIndex }
+		this.tui.requestRender()
+	}
+
 	private handleActiveInput(data: string, kb: Keybindings): boolean {
+		if (this.handleEnumSearchInput(data, kb)) return true
+
 		const field = this.selectedField()
 		if (this.focusPart !== "value" || !field || !fieldUsesInput(field)) return false
 
@@ -350,6 +422,37 @@ export class ScopedConfigEditor<Config extends object> {
 		}
 
 		return false
+	}
+
+	private handleEnumSearchInput(data: string, kb: Keybindings): boolean {
+		const state = this.activeEnumSearch
+		const field = this.selectedField()
+		if (!state || field?.kind !== "enum" || field.key !== state.fieldKey) return false
+
+		if (kb.matches(data, "tui.input.submit")) {
+			const value = enumSearchValues(field, state.input.getValue())[state.selectedIndex]
+			if (value !== undefined) {
+				this.activeEnumSearch = undefined
+				this.saveValue(this.currentScope(), field, value)
+			}
+			return true
+		}
+
+		const previousQuery = state.input.getValue()
+		state.input.handleInput(data)
+		if (state.input.getValue() !== previousQuery) state.selectedIndex = 0
+		this.tui.requestRender()
+		return true
+	}
+
+	private moveEnumSearchSelection(delta: number): void {
+		const state = this.activeEnumSearch
+		const field = this.selectedField()
+		if (!state || field?.kind !== "enum" || field.key !== state.fieldKey) return
+		const values = enumSearchValues(field, state.input.getValue())
+		if (values.length === 0) return
+		state.selectedIndex = (state.selectedIndex + delta + values.length) % values.length
+		this.tui.requestRender()
 	}
 
 	private commitActiveInput(): boolean {
@@ -386,6 +489,7 @@ export class ScopedConfigEditor<Config extends object> {
 	}
 
 	private saveValue(scope: ConfigScope, field: ScopedConfigField, value: unknown): void {
+		this.activeEnumSearch = undefined
 		this.activeInputError = undefined
 		this.config.update(scope, field.key as keyof Config & string, value as Config[keyof Config & string] | undefined)
 		this.onChange(this.config)
@@ -500,6 +604,12 @@ function roundToStepPrecision(value: number, step: number): number {
 function nextOption<T>(options: readonly T[], value: T): T {
 	const index = options.indexOf(value)
 	return options[(index + 1) % options.length] ?? options[0] ?? value
+}
+
+function enumSearchValues(field: EnumField, query: string): string[] {
+	const values = field.values.map(value => ({ value }))
+	if (!query) return values.map(item => item.value)
+	return fuzzyFilter(values, query, item => `${item.value} ${field.valueDescriptions?.[item.value] ?? ""}`).map(item => item.value)
 }
 
 function formatScopedValue(config: object, field: ScopedConfigField): string {
