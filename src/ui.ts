@@ -1,11 +1,14 @@
 import type { Theme } from "@earendil-works/pi-coding-agent"
 import {
 	CURSOR_MARKER,
+	Editor,
+	type EditorTheme,
 	fuzzyFilter,
 	getKeybindings,
 	Input,
 	Key,
 	matchesKey,
+	type TUI,
 	truncateToWidth,
 	visibleWidth,
 	wrapTextWithAnsi
@@ -13,7 +16,6 @@ import {
 import type { ConfigPatch, ConfigScope, ScopedConfig, ScopedConfigField, ScopedConfigPatch } from "./config"
 import { getConfigWarnings } from "./config"
 
-type RenderTui = { requestRender(): void }
 type Keybindings = ReturnType<typeof getKeybindings>
 
 type ScopedConfigChangeHandler<Config extends object> = (config: ScopedConfig<Config>) => void
@@ -21,9 +23,10 @@ type FocusPart = "include" | "value"
 type NumberInputParseResult = { ok: true; value: number } | { ok: false; message: string }
 type EnumField = Extract<ScopedConfigField, { kind: "enum" }>
 type EnumSearchState = { input: Input; fieldKey: string; selectedIndex: number }
+type TextEditorState = { editor: Editor; fieldKey: string }
 
 export class ScopedConfigEditor<Config extends object> {
-	private readonly tui: RenderTui
+	private readonly tui: TUI
 	private readonly theme: Theme
 	private readonly config: ScopedConfig<Config>
 	private readonly onChange: ScopedConfigChangeHandler<Config>
@@ -32,13 +35,14 @@ export class ScopedConfigEditor<Config extends object> {
 	private readonly done: (result: undefined) => void
 	private activeInput: Input | undefined
 	private activeEnumSearch: EnumSearchState | undefined
+	private activeTextEditor: TextEditorState | undefined
 	private activeInputError: string | undefined
 	private focusPart: FocusPart = "value"
 	private currentTab = 0
 	private currentRow = 0
 
 	constructor(options: {
-		tui: RenderTui
+		tui: TUI
 		theme: Theme
 		config: ScopedConfig<Config>
 		onChange: ScopedConfigChangeHandler<Config>
@@ -90,6 +94,7 @@ export class ScopedConfigEditor<Config extends object> {
 		const kb = getKeybindings()
 		const isSpace = data === " " || matchesKey(data, Key.space) || matchesKey(data, Key.shift("space"))
 		if (this.handleCloseKey(data, kb)) return
+		if (this.handleActiveTextEditorInput(data, kb)) return
 		if (this.handleNavigationKey(data, kb)) return
 		if (this.handleActiveInput(data, kb)) return
 		if (this.handleActivationKey(data, kb, isSpace)) return
@@ -100,9 +105,10 @@ export class ScopedConfigEditor<Config extends object> {
 			this.done(undefined)
 			return true
 		}
-		if ((this.activeInput || this.activeEnumSearch) && kb.matches(data, "tui.select.cancel")) {
+		if ((this.activeInput || this.activeEnumSearch || this.activeTextEditor) && kb.matches(data, "tui.select.cancel")) {
 			this.activeInput = undefined
 			this.activeEnumSearch = undefined
+			this.activeTextEditor = undefined
 			this.activeInputError = undefined
 			this.tui.requestRender()
 			return true
@@ -169,7 +175,7 @@ export class ScopedConfigEditor<Config extends object> {
 				this.saveValue(this.currentScope(), field, nextNumberValue(field, getConfigValue(this.scoped[this.currentScope()], field.key)))
 			else if (field?.kind === "enum" && field.search)
 				this.saveValue(this.currentScope(), field, nextFieldValue(this.scoped[this.currentScope()], field))
-			else if (field?.kind !== "string") this.activateRow()
+			else if (field?.kind !== "string" && field?.kind !== "text") this.activateRow()
 			else if (this.isResetSelected()) this.reset(this.currentScope())
 			return true
 		}
@@ -230,8 +236,10 @@ export class ScopedConfigEditor<Config extends object> {
 						: "text"
 			const renderedValue = !isSet && note ? "" : ` ${this.theme.fg(valueStyle, value)}`
 			addWrappedWithPrefix(lines, width, prefix, `${renderedInclude}${this.theme.fg("text", field.label)}${renderedValue}${renderedNote}`)
-			if (selected)
+			if (selected) {
 				this.renderEnumSearch(lines, width, field, " ".repeat(visibleWidth(prefix) + visibleWidth(include) + visibleWidth(field.label) + 1))
+				this.renderTextEditor(lines, width, field, " ".repeat(visibleWidth(prefix) + visibleWidth(include)))
+			}
 		}
 		this.renderResetRow(lines, width, this.isResetSelected(fields))
 	}
@@ -264,13 +272,24 @@ export class ScopedConfigEditor<Config extends object> {
 		}
 	}
 
+	private renderTextEditor(lines: string[], width: number, field: ScopedConfigField, indent: string): void {
+		const state = this.activeTextEditor
+		if (!state || field.kind !== "text" || field.key !== state.fieldKey) return
+
+		const editorWidth = Math.max(1, width - visibleWidth(indent))
+		for (const line of state.editor.render(editorWidth)) lines.push(`${indent}${line}`)
+	}
+
 	private renderActiveValueDescription(lines: string[], width: number, scope: ConfigScope, fields: readonly ScopedConfigField[]): void {
 		const field = this.selectedField(fields)
 		const error = this.activeInput ? this.activeInputError : undefined
 		const warning = field ? getFieldWarning(this.scoped[scope], field) : undefined
-		const valueDescription = field && !this.activeEnumSearch ? getValueDescription(this.scoped[scope], field) : undefined
+		const valueDescription =
+			field && !this.activeEnumSearch && !this.activeTextEditor ? getValueDescription(this.scoped[scope], field) : undefined
 		lines.push("")
 		if (error) addWrappedWithPrefix(lines, width, " ", this.theme.fg("error", error))
+		else if (this.activeTextEditor)
+			addWrappedWithPrefix(lines, width, " ", this.theme.fg("muted", "Enter save • Shift+Enter newline • Esc discard"))
 		else if (warning) addWrappedWithPrefix(lines, width, " ", this.theme.fg("warning", warning))
 		else if (valueDescription) addWrappedWithPrefix(lines, width, " ", this.theme.fg("muted", valueDescription))
 		else lines.push("")
@@ -330,12 +349,13 @@ export class ScopedConfigEditor<Config extends object> {
 	private refresh(): void {
 		this.currentRow = Math.min(this.currentRow, this.rowCount() - 1)
 		if (this.activeEnumSearch && this.selectedField()?.key !== this.activeEnumSearch.fieldKey) this.activeEnumSearch = undefined
+		if (this.activeTextEditor && this.selectedField()?.key !== this.activeTextEditor.fieldKey) this.activeTextEditor = undefined
 		this.updateFocus()
 		this.tui.requestRender()
 	}
 
 	private updateFocus(): void {
-		if (this.activeEnumSearch) {
+		if (this.activeEnumSearch || this.activeTextEditor) {
 			this.focusPart = "value"
 			return
 		}
@@ -367,6 +387,7 @@ export class ScopedConfigEditor<Config extends object> {
 		else if (field.kind === "number" && field.values)
 			this.saveValue(scope, field, nextNumberValue(field, getConfigValue(this.scoped[scope], field.key)))
 		else if (field.kind === "enum" && field.search) this.startEnumSearch(field)
+		else if (field.kind === "text") this.startTextEditor(field)
 		else if (fieldUsesInput(field)) this.startInput(field)
 		else this.saveValue(scope, field, nextFieldValue(this.scoped[scope], field))
 	}
@@ -375,6 +396,7 @@ export class ScopedConfigEditor<Config extends object> {
 		const current = getConfigValue(this.scoped[scope], field.key)
 		const nextIsSet = current === undefined
 		this.activeInput = undefined
+		this.activeTextEditor = undefined
 		this.saveValue(scope, field, nextIsSet ? field.default : undefined)
 	}
 
@@ -387,6 +409,20 @@ export class ScopedConfigEditor<Config extends object> {
 		input.focused = true
 		this.activeInput = input
 		this.updateActiveInputError(field)
+		this.tui.requestRender()
+	}
+
+	private startTextEditor(field: Extract<ScopedConfigField, { kind: "text" }>): void {
+		const editor = new Editor(this.tui, getTextEditorTheme(this.theme), { paddingX: 0 })
+		const value = getConfigValue(this.scoped[this.currentScope()], field.key)
+		editor.setText(typeof value === "string" ? value : "")
+		editor.focused = true
+		editor.disableSubmit = true
+		editor.onChange = () => this.tui.requestRender()
+		this.activeInput = undefined
+		this.activeEnumSearch = undefined
+		this.activeInputError = undefined
+		this.activeTextEditor = { editor, fieldKey: field.key }
 		this.tui.requestRender()
 	}
 
@@ -422,6 +458,22 @@ export class ScopedConfigEditor<Config extends object> {
 		}
 
 		return false
+	}
+
+	private handleActiveTextEditorInput(data: string, kb: Keybindings): boolean {
+		const state = this.activeTextEditor
+		const field = this.selectedField()
+		if (!state || field?.kind !== "text" || field.key !== state.fieldKey) return false
+
+		if (kb.matches(data, "tui.input.submit")) {
+			this.activeTextEditor = undefined
+			this.saveValue(this.currentScope(), field, state.editor.getExpandedText())
+			return true
+		}
+
+		state.editor.handleInput(data)
+		this.tui.requestRender()
+		return true
 	}
 
 	private handleEnumSearchInput(data: string, kb: Keybindings): boolean {
@@ -490,6 +542,7 @@ export class ScopedConfigEditor<Config extends object> {
 
 	private saveValue(scope: ConfigScope, field: ScopedConfigField, value: unknown): void {
 		this.activeEnumSearch = undefined
+		this.activeTextEditor = undefined
 		this.activeInputError = undefined
 		this.config.update(scope, field.key as keyof Config & string, value as Config[keyof Config & string] | undefined)
 		this.onChange(this.config)
@@ -535,6 +588,19 @@ function getConfigValue(config: object, key: string): unknown {
 
 function fieldUsesInput(field: ScopedConfigField): boolean {
 	return field.kind === "string" || (field.kind === "number" && !field.values)
+}
+
+function getTextEditorTheme(theme: Theme): EditorTheme {
+	return {
+		borderColor: text => theme.fg("border", text),
+		selectList: {
+			selectedPrefix: text => theme.fg("accent", text),
+			selectedText: text => theme.bg("selectedBg", theme.fg("text", text)),
+			description: text => theme.fg("muted", text),
+			scrollInfo: text => theme.fg("muted", text),
+			noMatch: text => theme.fg("muted", text)
+		}
+	}
 }
 
 function renderInput(input: Input, width: number): string {
@@ -637,6 +703,7 @@ function getValueDescription(config: object, field: ScopedConfigField): string |
 		case "boolean":
 			return field.valueDescriptions?.[value as "on" | "off"]
 		case "string":
+		case "text":
 			return undefined
 	}
 }
@@ -645,8 +712,17 @@ function formatFieldValue(field: ScopedConfigField, value: unknown): string {
 	if (value === undefined) return "unset"
 	if (field.kind === "boolean") return value ? "on" : "off"
 	if (field.kind === "string") return JSON.stringify(String(value))
+	if (field.kind === "text") return formatTextValue(String(value))
 	if (field.kind === "number") return String(value)
 	return String(value)
+}
+
+function formatTextValue(value: string): string {
+	const lineCount = value.split("\n").length
+	const preview = value.replace(/\s+/g, " ").trim()
+	const quoted = preview ? JSON.stringify(preview) : '""'
+	const suffix = lineCount > 1 ? ` (${lineCount} lines)` : ""
+	return `${truncateToWidth(quoted, 48, "…")}${suffix}`
 }
 
 function getScopeNote(

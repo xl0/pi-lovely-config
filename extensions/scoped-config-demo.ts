@@ -55,6 +55,10 @@ export default function (pi: ExtensionAPI) {
 					label: "Signature",
 					description: "String field. Use the include toggle to unset the value"
 				}),
+				instructions: field.text("Keep replies concise.\nPrefer direct answers.", {
+					label: "Instructions",
+					description: "Multi-line text field. Enter opens editor below the row; Shift+Enter inserts newline"
+				}),
 				retries: field.number(1, {
 					label: "Retries",
 					description: "Number field with explicit values. Space cycles values; direct edit is disabled",
@@ -108,6 +112,7 @@ export default function (pi: ExtensionAPI) {
 					`model=${config.model}`,
 					`compact=${config.compactMode === true ? "on" : "off"}`,
 					`signature=${JSON.stringify(config.signature)}`,
+					`instructions=${config.instructions.split("\n").length}l`,
 					`temperature=${config.temperature}`,
 					`retries=${config.retries}`,
 					`detail=${config.detailLevel}`,

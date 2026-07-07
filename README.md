@@ -18,7 +18,8 @@ const config = defineScopedConfig({
 	schema: {
 		mood: field.enum(["calm", "spicy", "feral"], "calm"),
 		temperature: field.number(0.7, { min: 0, max: 2, step: 0.1 }),
-		signature: field.string("sent from pi")
+		signature: field.string("sent from pi"),
+		instructions: field.text("Keep replies concise.")
 	}
 })
 
@@ -61,13 +62,19 @@ const config = defineScopedConfig({
 		}),
 		compact: field.boolean(false),
 		signature: field.string("sent from pi"),
+		instructions: field.text("Keep replies concise.", {
+			label: "Instructions",
+			description: "Long multi-line text edited in the TUI editor"
+		}),
 		temperature: field.number(0.7, { min: 0, max: 2, step: 0.1 }),
 		retries: field.number(1, { values: [0, 1, 2, 3] })
 	}
 })
 ```
 
-Supported fields: enum, boolean, string, number.
+Supported fields: enum, boolean, string, text, number. String fields are
+single-line. Text fields resolve to string values and use a multi-line TUI
+editor.
 
 UI-only metadata:
 

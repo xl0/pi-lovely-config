@@ -26,7 +26,7 @@ type FieldMeta = {
 }
 
 type BaseField = FieldMeta & {
-	kind: "enum" | "boolean" | "string" | "number"
+	kind: "enum" | "boolean" | "string" | "text" | "number"
 }
 
 export type EnumConfigField<Values extends StringValues = StringValues> = BaseField & {
@@ -45,6 +45,11 @@ export type BooleanConfigField = BaseField & {
 
 export type StringConfigField = BaseField & {
 	kind: "string"
+	default: string
+}
+
+export type TextConfigField = BaseField & {
+	kind: "text"
 	default: string
 }
 
@@ -70,7 +75,7 @@ export type ValuedNumberConfigField<Values extends NumberValues = NumberValues> 
 }
 
 export type NumberConfigField = RangedNumberConfigField | ValuedNumberConfigField
-export type ConfigField = EnumConfigField | BooleanConfigField | StringConfigField | NumberConfigField
+export type ConfigField = EnumConfigField | BooleanConfigField | StringConfigField | TextConfigField | NumberConfigField
 export type ConfigSchema = Record<string, ConfigField>
 export type ScopedConfigField = ConfigField & { key: string; label: string }
 
@@ -82,7 +87,7 @@ type FieldValue<Field> = Field extends { kind: "enum"; values: infer Values exte
 	? Values[number]
 	: Field extends { kind: "boolean" }
 		? boolean
-		: Field extends { kind: "string" }
+		: Field extends { kind: "string" | "text" }
 			? string
 			: Field extends { kind: "number"; values: infer Values extends readonly number[] }
 				? Values[number]
@@ -109,6 +114,7 @@ export type ScopedConfig<Config extends object> = {
 type EnumFieldOptions<Values extends StringValues> = Omit<EnumConfigField<Values>, "kind" | "values" | "default">
 type BooleanFieldOptions = Omit<BooleanConfigField, "kind" | "default">
 type StringFieldOptions = Omit<StringConfigField, "kind" | "default">
+type TextFieldOptions = Omit<TextConfigField, "kind" | "default">
 type RangedNumberOptions = Omit<RangedNumberConfigField, "kind" | "default">
 type ValuedNumberOptions<Values extends NumberValues> = Omit<ValuedNumberConfigField<Values>, "kind" | "default">
 
@@ -128,6 +134,10 @@ function booleanField(defaultValue: boolean, options: BooleanFieldOptions = {}):
 
 function stringField(defaultValue: string, options: StringFieldOptions = {}): StringConfigField {
 	return { kind: "string", default: defaultValue, ...options }
+}
+
+function textField(defaultValue: string, options: TextFieldOptions = {}): TextConfigField {
+	return { kind: "text", default: defaultValue, ...options }
 }
 
 function numberField<const Values extends NumberValues>(
@@ -169,6 +179,7 @@ export const field = {
 	enum: enumField,
 	boolean: booleanField,
 	string: stringField,
+	text: textField,
 	number: numberField
 }
 
@@ -321,6 +332,9 @@ function getConfigValueWarning(field: ScopedConfigField, value: unknown): string
 		case "boolean":
 			return typeof value === "boolean" ? undefined : `/${field.key} must be boolean`
 		case "string":
+			if (typeof value !== "string") return `/${field.key} must be string`
+			return /[\r\n]/.test(value) ? `/${field.key} must be single-line string` : undefined
+		case "text":
 			return typeof value === "string" ? undefined : `/${field.key} must be string`
 		case "number":
 			if (typeof value !== "number" || !Number.isFinite(value)) return `/${field.key} must be number`
