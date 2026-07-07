@@ -51,7 +51,7 @@ Validation / preservation:
 - Unknown keys are preserved by key updates and ignored by resolved typed config.
 - Invalid known values become warnings and are ignored while resolving.
 - `update()` only accepts known keys and valid values; manual invalid file values remain preserved.
-- Saved string values containing newlines are invalid; use text fields for multiline strings.
+- String field defaults and saved string values containing newlines are invalid; use text fields for multiline strings.
 - Empty files are deleted.
 
 TUI notes:

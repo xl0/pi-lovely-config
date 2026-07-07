@@ -133,6 +133,7 @@ function booleanField(defaultValue: boolean, options: BooleanFieldOptions = {}):
 }
 
 function stringField(defaultValue: string, options: StringFieldOptions = {}): StringConfigField {
+	if (/[\r\n]/.test(defaultValue)) throw new Error("String field default must be single-line")
 	return { kind: "string", default: defaultValue, ...options }
 }
 
