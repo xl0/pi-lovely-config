@@ -13,7 +13,7 @@ Core files:
 Public API:
 
 - `defineScopedConfig()` declares a flat keyed schema and returns a stateful config instance.
-- `field.enum()`, `field.boolean()`, `field.string()`, `field.number()` create fields.
+- `field.enum()`, `field.boolean()`, `field.string()`, `field.text()`, `field.number()` create fields.
 - `config.load(cwd)` loads scoped patches into the config object.
 - `config.value`, `config.scoped`, and `config.warnings` hold current loaded state.
 - `config.update(scope, key, value)` writes one known key, reloads, and returns the config object.
@@ -28,7 +28,8 @@ Schema model:
 
 - Schema is a keyed object; config keys come from object keys.
 - Field `label` is optional and defaults to key.
-- Supported fields: enum, boolean, string, number.
+- Supported fields: enum, boolean, string, text, number.
+- String fields are single-line. Text fields resolve to string values and use multiline TUI editing.
 - Field metadata: `description`, `valueDescriptions`, `depth`, `visibleWhen`.
 - Enum fields can opt into TUI fuzzy search with `search: true`.
 - Number fields support either range mode (`min` / `max` / `step`) or explicit `values`, not both.
@@ -50,12 +51,14 @@ Validation / preservation:
 - Unknown keys are preserved by key updates and ignored by resolved typed config.
 - Invalid known values become warnings and are ignored while resolving.
 - `update()` only accepts known keys and valid values; manual invalid file values remain preserved.
+- Saved string values containing newlines are invalid; use text fields for multiline strings.
 - Empty files are deleted.
 
 TUI notes:
 
-- Editor uses left/right focus between include checkbox and value. Enter edits free-form values, opens searchable enum pickers, and cycles other discrete values. Space toggles include, quick-steps free-form numbers, or cycles searchable enums. Enter accepts input/search selections and exits edit mode.
+- Editor uses left/right focus between include checkbox and value. Enter edits free-form values, opens searchable enum pickers, opens multiline text editors, and cycles other discrete values. Space toggles include, quick-steps free-form numbers, or cycles searchable enums. Enter accepts input/search/text selections and exits edit mode.
 - Searchable enum input replaces the row value while filtered results render inline below that row.
+- Multiline text editor renders inline below the selected row; Shift+Enter inserts newlines and Esc discards uncommitted input.
 - Scope notes show compact default/user/workspace source values where relevant.
 - `visibleWhen` is UI-only; hidden saved values stay in config until cleared/reset.
 - Inline input Esc exits edit mode and discards uncommitted input.
@@ -66,7 +69,7 @@ TUI notes:
 
 `extensions/scoped-config-demo.ts` registers `/scoped-config-demo`.
 
-It opens `ScopedConfigEditor` in TUI mode, showing ranged number, searchable enum, boolean, string, valued number, nested, conditional fields, and a searchable enum populated from available Pi models. If no authenticated models are available, it warns and exits. It updates footer status with effective values after edits. Demo always uses both scopes.
+It opens `ScopedConfigEditor` in TUI mode, showing ranged number, searchable enum, boolean, string, multiline text, valued number, nested, conditional fields, and a searchable enum populated from available Pi models. If no authenticated models are available, it warns and exits. It updates footer status with effective values after edits. Demo always uses both scopes.
 
 ## Tooling
 
