@@ -1,91 +1,111 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import { defineScopedConfig, field, ScopedConfigEditor } from "../src/index"
 
-const demoSchema = {
-	temperature: field.number(0.7, {
-		label: "Temperature",
-		description: "Number field with min, max, and step. Space steps through values; direct edit accepts numbers",
-		min: 0,
-		max: 2,
-		step: 0.1
-	}),
-	theme: field.enum(["system", "light", "dark", "unset"], "system", {
-		label: "Theme",
-		description: "Cycles an enum value. Workspace overrides user when both scopes are active",
-		valueDescriptions: {
-			system: "Follow Pi's current theme",
-			light: "Prefer a light presentation",
-			dark: "Prefer a dark presentation",
-			unset: "Literal enum value named unset"
-		}
-	}),
-	compactMode: field.boolean(false, {
-		label: "Compact mode",
-		description: "Boolean field. Turning it on hides Detail level via visibleWhen",
-		valueDescriptions: {
-			on: "Enable compact mode and hide Detail level",
-			off: "Disable compact mode and show Detail level"
-		}
-	}),
-	signature: field.string("sent from pi", {
-		label: "Signature",
-		description: "String field. Use the include toggle to unset the value"
-	}),
-	retries: field.number(1, {
-		label: "Retries",
-		description: "Number field with explicit values. Space cycles values; direct edit is disabled",
-		values: [0, 1, 2, 3],
-		valueDescriptions: {
-			0: "No retries",
-			1: "Retry once",
-			2: "Retry twice",
-			3: "Retry three times"
-		}
-	}),
-	detailLevel: field.enum(["low", "medium", "high"], "medium", {
-		label: "Detail level",
-		description: "Conditional enum field. Visible only while Compact mode is not on",
-		valueDescriptions: {
-			low: "Show terse details",
-			medium: "Show balanced details",
-			high: "Show verbose details"
-		},
-		visibleWhen: ctx => ctx.get("compactMode") !== true
-	}),
-	experimental: field.boolean(false, {
-		label: "Experimental options",
-		description: "Parent toggle for an indented child field",
-		valueDescriptions: {
-			on: "Show experimental child options",
-			off: "Hide experimental child options"
-		}
-	}),
-	experimentMode: field.enum(["safe", "fast", "weird"], "safe", {
-		label: "Experiment mode",
-		description: "Indented child field. Visible only when Experimental options is on",
-		valueDescriptions: {
-			safe: "Prefer predictable behavior",
-			fast: "Prefer speed over caution",
-			weird: "Exercise unusual enum values"
-		},
-		depth: 1,
-		visibleWhen: ctx => ctx.get("experimental") === true
-	})
-} as const
-
-const demoConfig = defineScopedConfig({
-	fileName: "scoped-config-demo.json",
-	schema: demoSchema
-})
-
 export default function (pi: ExtensionAPI) {
 	pi.registerCommand("scoped-config-demo", {
 		description: "Open scoped config demo",
 		handler: async (_args, ctx) => {
+			const availableModels = ctx.modelRegistry.getAvailable()
+			const [firstModelId, ...otherModelIds] = availableModels.map(model => `${model.provider}/${model.id}`)
+			if (firstModelId === undefined) {
+				ctx.ui.notify("No authenticated models available", "warning")
+				return
+			}
+
+			const modelValues = [firstModelId, ...otherModelIds] as const
+			const currentModelId = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined
+			const defaultModel = currentModelId && modelValues.includes(currentModelId) ? currentModelId : modelValues[0]
+			const modelDescriptions: Record<string, string> = Object.fromEntries(
+				availableModels.map(model => [`${model.provider}/${model.id}`, model.name || model.id])
+			)
+			const demoSchema = {
+				temperature: field.number(0.7, {
+					label: "Temperature",
+					description: "Number field with min, max, and step. Space steps through values; direct edit accepts numbers",
+					min: 0,
+					max: 2,
+					step: 0.1
+				}),
+				theme: field.enum(["system", "light", "dark", "unset"], "system", {
+					label: "Theme",
+					description: "Searchable enum field. Enter opens fuzzy search; Space cycles values",
+					search: true,
+					valueDescriptions: {
+						system: "Follow Pi's current theme",
+						light: "Prefer a light presentation",
+						dark: "Prefer a dark presentation",
+						unset: "Literal enum value named unset"
+					}
+				}),
+				model: field.enum(modelValues, defaultModel, {
+					label: "Model",
+					description: "Searchable enum populated from Pi's available models",
+					search: true,
+					valueDescriptions: modelDescriptions
+				}),
+				compactMode: field.boolean(false, {
+					label: "Compact mode",
+					description: "Boolean field. Turning it on hides Detail level via visibleWhen",
+					valueDescriptions: {
+						on: "Enable compact mode and hide Detail level",
+						off: "Disable compact mode and show Detail level"
+					}
+				}),
+				signature: field.string("sent from pi", {
+					label: "Signature",
+					description: "String field. Use the include toggle to unset the value"
+				}),
+				retries: field.number(1, {
+					label: "Retries",
+					description: "Number field with explicit values. Space cycles values; direct edit is disabled",
+					values: [0, 1, 2, 3],
+					valueDescriptions: {
+						0: "No retries",
+						1: "Retry once",
+						2: "Retry twice",
+						3: "Retry three times"
+					}
+				}),
+				detailLevel: field.enum(["low", "medium", "high"], "medium", {
+					label: "Detail level",
+					description: "Conditional enum field. Visible only while Compact mode is not on",
+					valueDescriptions: {
+						low: "Show terse details",
+						medium: "Show balanced details",
+						high: "Show verbose details"
+					},
+					visibleWhen: ctx => ctx.get("compactMode") !== true
+				}),
+				experimental: field.boolean(false, {
+					label: "Experimental options",
+					description: "Parent toggle for an indented child field",
+					valueDescriptions: {
+						on: "Show experimental child options",
+						off: "Hide experimental child options"
+					}
+				}),
+				experimentMode: field.enum(["safe", "fast", "weird"], "safe", {
+					label: "Experiment mode",
+					description: "Indented child field. Visible only when Experimental options is on",
+					valueDescriptions: {
+						safe: "Prefer predictable behavior",
+						fast: "Prefer speed over caution",
+						weird: "Exercise unusual enum values"
+					},
+					depth: 1,
+					visibleWhen: ctx => ctx.get("experimental") === true
+				})
+			} as const
+
+			const demoConfig = defineScopedConfig({
+				fileName: "scoped-config-demo.json",
+				schema: demoSchema
+			})
 			demoConfig.load(ctx.cwd)
 			const format = (config: typeof demoConfig.defaults) =>
 				[
 					`theme=${config.theme}`,
+					`model=${config.model}`,
 					`compact=${config.compactMode === true ? "on" : "off"}`,
 					`signature=${JSON.stringify(config.signature)}`,
 					`temperature=${config.temperature}`,

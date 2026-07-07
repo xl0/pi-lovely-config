@@ -56,7 +56,8 @@ const config = defineScopedConfig({
 	schema: {
 		theme: field.enum(["system", "light", "dark"], "system", {
 			label: "Theme",
-			description: "Preferred theme"
+			description: "Preferred theme",
+			search: true
 		}),
 		compact: field.boolean(false),
 		signature: field.string("sent from pi"),
@@ -73,6 +74,7 @@ UI-only metadata:
 - `label`
 - `description`
 - `valueDescriptions`
+- `search` for enum fields; enables fuzzy enum picker in the TUI editor
 - `depth`
 - `visibleWhen`
 

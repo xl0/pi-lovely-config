@@ -30,6 +30,7 @@ Schema model:
 - Field `label` is optional and defaults to key.
 - Supported fields: enum, boolean, string, number.
 - Field metadata: `description`, `valueDescriptions`, `depth`, `visibleWhen`.
+- Enum fields can opt into TUI fuzzy search with `search: true`.
 - Number fields support either range mode (`min` / `max` / `step`) or explicit `values`, not both.
 
 Scopes are fixed:
@@ -53,7 +54,8 @@ Validation / preservation:
 
 TUI notes:
 
-- Editor uses left/right focus between include checkbox and value. Enter edits free-form values and cycles discrete values; Space toggles include or quick-steps free-form numbers. Enter accepts input and exits edit mode.
+- Editor uses left/right focus between include checkbox and value. Enter edits free-form values, opens searchable enum pickers, and cycles other discrete values. Space toggles include, quick-steps free-form numbers, or cycles searchable enums. Enter accepts input/search selections and exits edit mode.
+- Searchable enum input replaces the row value while filtered results render inline below that row.
 - Scope notes show compact default/user/workspace source values where relevant.
 - `visibleWhen` is UI-only; hidden saved values stay in config until cleared/reset.
 - Inline input Esc exits edit mode and discards uncommitted input.
@@ -64,7 +66,7 @@ TUI notes:
 
 `extensions/scoped-config-demo.ts` registers `/scoped-config-demo`.
 
-It opens `ScopedConfigEditor` in TUI mode, showing ranged number, enum, boolean, string, valued number, nested, and conditional fields. It updates footer status with effective values after edits. Non-TUI mode reports effective values via notification. Demo always uses both scopes.
+It opens `ScopedConfigEditor` in TUI mode, showing ranged number, searchable enum, boolean, string, valued number, nested, conditional fields, and a searchable enum populated from available Pi models. If no authenticated models are available, it warns and exits. It updates footer status with effective values after edits. Demo always uses both scopes.
 
 ## Tooling
 

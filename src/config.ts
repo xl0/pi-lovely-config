@@ -33,6 +33,7 @@ export type EnumConfigField<Values extends StringValues = StringValues> = BaseFi
 	kind: "enum"
 	values: Values
 	valueDescriptions?: Partial<Record<Values[number], string>> & Record<string, string>
+	search?: boolean
 	default: Values[number]
 }
 
