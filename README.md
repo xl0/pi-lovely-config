@@ -150,8 +150,7 @@ Editor writes via `update()` / `resetScope()`, then reloads merged config.
 | [Pi Lovely Dev Tools](https://github.com/xl0/pi-lovely-dev-tools) | `/tool`, `/show-sysprompt`, `/show-context`, `/llm-stats` |
 | [Pi Lovely Codex](https://github.com/xl0/pi-lovely-codex) | GPT fast mode and Codex-style `apply_patch` |
 | [Pi Lovely IDE](https://github.com/xl0/pi-lovely-ide) | Interactive IDE integration |
-| [Pi Lovely Comment](https://github.com/xl0/agent-files/tree/master/pi/packages/pi-lovely-comment) | open the last assistant message in your editor and sync edits back into the prompt |
-| [Pi Lovely Rename](https://github.com/xl0/agent-files/tree/master/pi/packages/pi-lovely-rename) | automatic and manual session naming |
+
 ---
 
 Like this work? [Hire me](https://alexey.work/cv?ref=pi-lovely-config)
