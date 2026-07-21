@@ -53,8 +53,9 @@ single-scope configs.
 Unknown keys are preserved in files but ignored by typed config resolution. This
 lets newer config files survive older app versions.
 
-Invalid known values are warnings and are ignored while resolving. Invalid JSON
-or non-object config files still throw.
+Invalid known values, invalid JSON, and non-object config files are warnings and
+are ignored while resolving. Writing a key replaces a malformed file with valid
+config.
 
 ## Schema
 
@@ -107,7 +108,7 @@ config.load(ctx.cwd)
 
 - `value` — defaults-filled merged config
 - `scoped` — raw user/workspace patches, including unknown keys
-- `warnings` — invalid known values by scope/path
+- `warnings` — invalid field or malformed file warnings by scope/path; field warnings include `key`
 
 Update one key:
 

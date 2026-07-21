@@ -1,22 +1,17 @@
 # Plan
 
-## Current direction
+Keep the library small: a flat keyed schema, fixed user/workspace storage,
+and an optional TUI editor. Nothing else belongs here.
 
-Keep the library small: keyed flat schema + fixed user/workspace storage + optional TUI editor.
-Unknown keys must survive older app versions, so runtime ignores them and preserves them on key updates.
+Config files are edited by humans and shared across versions, so the runtime
+must be forgiving: unknown keys survive updates, invalid known values warn
+instead of failing, malformed files read as empty and are repaired by writes,
+and only what the schema knows is ever written back.
 
 ## Todo
 
-- [x] Core scoped config with fixed user/workspace paths.
-- [x] Keyed schema API with field builders.
-- [x] Defaults-filled merged config resolution.
-- [x] Unknown-key preservation across key updates.
-- [x] Invalid known-value warnings with ignored resolution.
-- [x] Key-level `update()` flow that writes and reloads.
-- [x] No separate loaded/state wrapper; config object owns loaded state.
-- [x] TUI editor for scope tabs, field cycling, reset, visibility, and basic scope notes.
-- [x] Configurable scope mode for user-only, workspace-only, or combined configs.
-- [x] Opt-in searchable enum picker in TUI editor.
-- [x] Multiline text fields with inline TUI editor.
-- [x] Demo Pi extension in `extensions/` with `/scoped-config-demo`.
-- [x] README updated for keyed schema API.
+- [x] Core library: keyed schema, field builders, scoped resolution,
+      key-level `update()`, unknown-key preservation, invalid-value warnings.
+- [x] TUI editor: scope tabs, cycling, reset, `visibleWhen`, scope notes,
+      searchable enums, multiline text fields.
+- [x] Demo extension and README covering the keyed schema API.
