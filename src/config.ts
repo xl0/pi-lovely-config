@@ -6,7 +6,7 @@ export type ConfigScope = "user" | "workspace"
 export type ConfigPatch = Record<string, unknown>
 export type ScopedConfigPatch = Record<ConfigScope, ConfigPatch>
 export type ResolvedConfig<Config extends object> = { [Key in keyof Config]-?: NonNullable<Config[Key]> }
-export type ConfigWarning = { key: string; message: string }
+export type ConfigWarning = { key?: string; message: string }
 export type ScopedConfigWarning = ConfigWarning & { scope: ConfigScope; path: string }
 
 type StringValues = readonly [string, ...string[]]
@@ -239,11 +239,17 @@ class ScopedConfigImpl<Config extends object> implements ScopedConfig<Config> {
 
 	load(cwd: string): ScopedConfig<Config> {
 		const scoped: ScopedConfigPatch = { user: {}, workspace: {} }
-		for (const scope of this.scopes) scoped[scope] = readConfigFile(this.path(scope, cwd))
+		const warnings: ScopedConfigWarning[] = []
+		for (const scope of this.scopes) {
+			const path = this.path(scope, cwd)
+			const result = readConfigFile(path)
+			scoped[scope] = result.config
+			if (result.warning) warnings.push({ message: result.warning, scope, path })
+		}
 		this.cwd = cwd
 		this.scoped = scoped
 		this.value = this.resolve(scoped)
-		this.warnings = []
+		this.warnings = warnings
 		for (const scope of this.scopes) {
 			for (const warning of getConfigWarnings(this.fields, scoped[scope])) {
 				this.warnings.push({ ...warning, scope, path: this.path(scope, cwd) })
@@ -265,7 +271,7 @@ class ScopedConfigImpl<Config extends object> implements ScopedConfig<Config> {
 		const configPath = this.path(scope)
 		// Patch existing file instead of writing only known schema keys.
 		// Unknown keys belong to newer app versions and must survive old versions.
-		const patch = readConfigFile(configPath)
+		const patch = readConfigFile(configPath).config
 		if (value === undefined) delete patch[key]
 		else patch[key] = value
 		writeConfigFile(configPath, patch)
@@ -276,7 +282,7 @@ class ScopedConfigImpl<Config extends object> implements ScopedConfig<Config> {
 		if (!this.scopes.includes(scope)) throw new Error(`Config scope is not active: ${scope}`)
 		const cwd = this.currentCwd()
 		const configPath = this.path(scope)
-		const patch = readConfigFile(configPath)
+		const patch = readConfigFile(configPath).config
 		for (const field of this.fields) delete patch[field.key]
 		writeConfigFile(configPath, patch)
 		return this.load(cwd)
@@ -288,20 +294,24 @@ class ScopedConfigImpl<Config extends object> implements ScopedConfig<Config> {
 	}
 }
 
-function readConfigFile(path: string): ConfigPatch {
-	if (!existsSync(path)) return {}
+function readConfigFile(path: string): { config: ConfigPatch; warning?: string } {
+	if (!existsSync(path)) return { config: {} }
+	const source = readFileSync(path, "utf-8")
+	let value: unknown
 	try {
-		const value = JSON.parse(readFileSync(path, "utf-8"))
-		if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("must be an object")
-		const config: ConfigPatch = {}
-		for (const [key, fieldValue] of Object.entries(value)) {
-			if (fieldValue !== undefined) config[key] = fieldValue
-		}
-		return config
+		value = JSON.parse(source)
 	} catch (error) {
 		const message = error instanceof Error && error.message ? error.message : String(error)
-		throw new Error(`Invalid config at ${path}: ${message}`)
+		return { config: {}, warning: `Invalid config: ${message}; file is ignored` }
 	}
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		return { config: {}, warning: "Invalid config: must be an object; file is ignored" }
+	}
+	const config: ConfigPatch = {}
+	for (const [key, fieldValue] of Object.entries(value)) {
+		if (fieldValue !== undefined) config[key] = fieldValue
+	}
+	return { config }
 }
 
 function writeConfigFile(path: string, config: ConfigPatch): void {
