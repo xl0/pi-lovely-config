@@ -1,6 +1,6 @@
 {
 	"name": "@xl0/pi-lovely-config",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"description": "Scoped config helpers for Pi extension packages",
 	"license": "MIT",
 	"type": "module",
