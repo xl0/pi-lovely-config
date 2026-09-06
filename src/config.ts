@@ -26,7 +26,7 @@ type FieldMeta = {
 }
 
 type BaseField = FieldMeta & {
-	kind: "enum" | "boolean" | "string" | "text" | "number"
+	kind: "enum" | "multiEnum" | "boolean" | "string" | "text" | "number"
 }
 
 export type EnumConfigField<Values extends StringValues = StringValues> = BaseField & {
@@ -35,6 +35,13 @@ export type EnumConfigField<Values extends StringValues = StringValues> = BaseFi
 	valueDescriptions?: Partial<Record<Values[number], string>> & Record<string, string>
 	search?: boolean
 	default: Values[number]
+}
+
+export type MultiEnumConfigField<Values extends StringValues = StringValues> = BaseField & {
+	kind: "multiEnum"
+	values: Values
+	valueDescriptions?: Partial<Record<Values[number], string>> & Record<string, string>
+	default: readonly Values[number][]
 }
 
 export type BooleanConfigField = BaseField & {
@@ -75,7 +82,13 @@ export type ValuedNumberConfigField<Values extends NumberValues = NumberValues> 
 }
 
 export type NumberConfigField = RangedNumberConfigField | ValuedNumberConfigField
-export type ConfigField = EnumConfigField | BooleanConfigField | StringConfigField | TextConfigField | NumberConfigField
+export type ConfigField =
+	| EnumConfigField
+	| MultiEnumConfigField
+	| BooleanConfigField
+	| StringConfigField
+	| TextConfigField
+	| NumberConfigField
 export type ConfigSchema = Record<string, ConfigField>
 export type ScopedConfigField = ConfigField & { key: string; label: string }
 
@@ -85,15 +98,17 @@ export type ConfigFromSchema<Schema extends ConfigSchema> = {
 
 type FieldValue<Field> = Field extends { kind: "enum"; values: infer Values extends readonly string[] }
 	? Values[number]
-	: Field extends { kind: "boolean" }
-		? boolean
-		: Field extends { kind: "string" | "text" }
-			? string
-			: Field extends { kind: "number"; values: infer Values extends readonly number[] }
-				? Values[number]
-				: Field extends { kind: "number" }
-					? number
-					: never
+	: Field extends { kind: "multiEnum"; values: infer Values extends readonly string[] }
+		? readonly Values[number][]
+		: Field extends { kind: "boolean" }
+			? boolean
+			: Field extends { kind: "string" | "text" }
+				? string
+				: Field extends { kind: "number"; values: infer Values extends readonly number[] }
+					? Values[number]
+					: Field extends { kind: "number" }
+						? number
+						: never
 
 export type ScopedConfig<Config extends object> = {
 	fileName: string
@@ -112,6 +127,7 @@ export type ScopedConfig<Config extends object> = {
 }
 
 type EnumFieldOptions<Values extends StringValues> = Omit<EnumConfigField<Values>, "kind" | "values" | "default">
+type MultiEnumFieldOptions<Values extends StringValues> = Omit<MultiEnumConfigField<Values>, "kind" | "values" | "default">
 type BooleanFieldOptions = Omit<BooleanConfigField, "kind" | "default">
 type StringFieldOptions = Omit<StringConfigField, "kind" | "default">
 type TextFieldOptions = Omit<TextConfigField, "kind" | "default">
@@ -126,6 +142,25 @@ function enumField<const Values extends StringValues>(
 	if (values.length === 0) throw new Error("Enum field must have at least one value")
 	if (!values.includes(defaultValue)) throw new Error(`Enum field default must be one of: ${values.join(", ")}`)
 	return { kind: "enum", values, default: defaultValue, ...options }
+}
+
+function multiEnumField<const Values extends StringValues>(
+	values: Values,
+	defaultValue: readonly Values[number][],
+	options: MultiEnumFieldOptions<Values> = {}
+): MultiEnumConfigField<Values> {
+	if (values.length === 0) throw new Error("Multi-enum field must have at least one value")
+	const warning = getMultiEnumWarning(values, defaultValue)
+	if (warning) throw new Error(`Multi-enum field default ${warning}`)
+	return { kind: "multiEnum", values, default: defaultValue, ...options }
+}
+
+function getMultiEnumWarning(values: readonly string[], value: unknown): string | undefined {
+	if (!Array.isArray(value)) return "must be array"
+	for (const item of value) {
+		if (typeof item !== "string" || !values.includes(item)) return `items should be one of: ${values.join(", ")}`
+	}
+	return undefined
 }
 
 function booleanField(defaultValue: boolean, options: BooleanFieldOptions = {}): BooleanConfigField {
@@ -178,6 +213,7 @@ function numberField(defaultValue: number, options: RangedNumberOptions | Valued
 
 export const field = {
 	enum: enumField,
+	multiEnum: multiEnumField,
 	boolean: booleanField,
 	string: stringField,
 	text: textField,
@@ -340,6 +376,10 @@ function getConfigValueWarning(field: ScopedConfigField, value: unknown): string
 			if (typeof value !== "string") return `/${field.key} must be string`
 			if (!field.values.includes(value)) return `/${field.key} should be one of: ${field.values.join(", ")}`
 			return undefined
+		case "multiEnum": {
+			const warning = getMultiEnumWarning(field.values, value)
+			return warning ? `/${field.key} ${warning}` : undefined
+		}
 		case "boolean":
 			return typeof value === "boolean" ? undefined : `/${field.key} must be boolean`
 		case "string":

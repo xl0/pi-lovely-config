@@ -77,12 +77,15 @@ const config = defineScopedConfig({
 			description: "Long multi-line text edited in the TUI editor"
 		}),
 		temperature: field.number(0.7, { min: 0, max: 2, step: 0.1 }),
-		retries: field.number(1, { values: [0, 1, 2, 3] })
+		retries: field.number(1, { values: [0, 1, 2, 3] }),
+		models: field.multiEnum(["gpt", "claude", "gemini"], ["claude"])
 	}
 })
 ```
 
-Supported fields: enum, boolean, string, text, number. String fields are
+Supported fields: enum, multiEnum, boolean, string, text, number. Multi-enum
+fields resolve to a string array; scopes replace the whole array, no merging.
+The TUI editor always opens a searchable checklist for them. String fields are
 single-line. Text fields resolve to string values and use a multi-line TUI
 editor. Number fields take either range mode (`min`/`max`/`step`) or an
 explicit `values` list, never both.

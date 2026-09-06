@@ -34,6 +34,7 @@ Field metadata: `description`, `valueDescriptions`, `depth`, `visibleWhen`.
 - String fields are single-line; text fields are also strings but edit
   multiline in the TUI.
 - Enum fields opt into fuzzy search with `search: true`.
+- MultiEnum fields hold a string array; each scope replaces the whole array.
 - Number fields use either range mode (`min`/`max`/`step`) or explicit
   `values`, never both.
 
@@ -64,7 +65,10 @@ Scope order is not configurable. Missing files read as empty patches.
   Enter edits/opens pickers or cycles discrete values; Space toggles
   include, quick-steps numbers, or cycles searchable enums.
 - Searchable enum input replaces the row value, results render inline
-  below it. Text editor also renders inline; Shift+Enter inserts newlines.
+  below it. MultiEnum reuses the same picker with `✓` markers and a
+  pending set: Space toggles, Enter commits, Esc discards. Checked items
+  float to the top; cursor follows the toggled item. Lists wrap, never
+  truncated. Text editor also renders inline; Shift+Enter inserts newlines.
 - Esc exits edit mode and discards uncommitted input.
 - Scope notes show compact default/user/workspace source values.
 - `visibleWhen` is UI-only: hidden saved values persist until cleared.

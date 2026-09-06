@@ -43,6 +43,11 @@ export default function (pi: ExtensionAPI) {
 					search: true,
 					valueDescriptions: modelDescriptions
 				}),
+				models: field.multiEnum(modelValues, [defaultModel], {
+					label: "Models",
+					description: "Multi-select enum. Enter opens searchable picker; Space toggles items, Enter saves",
+					valueDescriptions: modelDescriptions
+				}),
 				compactMode: field.boolean(false, {
 					label: "Compact mode",
 					description: "Boolean field. Turning it on hides Detail level via visibleWhen",
@@ -110,6 +115,7 @@ export default function (pi: ExtensionAPI) {
 				[
 					`theme=${config.theme}`,
 					`model=${config.model}`,
+					`models=${config.models.length}`,
 					`compact=${config.compactMode === true ? "on" : "off"}`,
 					`signature=${JSON.stringify(config.signature)}`,
 					`instructions=${config.instructions.split("\n").length}l`,
