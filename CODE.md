@@ -84,7 +84,8 @@ Scope order is not configurable. Missing files read as empty patches.
 
 ## Releases
 
-- `CHANGELOG.md` holds human-written `[Unreleased]` entries.
+- `CHANGELOG.md` holds human-written `[Unreleased]` entries and release
+  history back to 0.0.1; historical dates follow npm publication dates (UTC).
 - `bun run release [patch|minor|major|x.y.z] [--no-push]` runs
   `scripts/release.ts`, matching the codex/web staged-release flow.
   It checks origin, npm, release-file cleanliness, and package checks before
