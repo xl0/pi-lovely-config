@@ -4,6 +4,8 @@ Historical release dates use npm publication dates (UTC).
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-09-06
+
 ### Added
 
 - Multi-enum fields with whole-array scope overrides and searchable TUI
