@@ -162,6 +162,28 @@ cycles values, Space toggles include, Esc discards uncommitted input.
 
 Editor writes via `update()` / `resetScope()`, then reloads merged config.
 
+## Releasing
+
+Write entries under `CHANGELOG.md`'s `[Unreleased]`, then commit them.
+From `master`, with Bun 1.3.13 and npm 12.0.2 (logged in):
+
+```sh
+bun run release [patch|minor|major|x.y.z] [--no-push]
+```
+
+The script checks the release, bumps the version, rolls the changelog, and
+pauses for review before committing, tagging, and pushing. `--no-push`
+stops after the local commit and tag.
+
+The tag triggers `.github/workflows/publish.yml`: checks, npm staging with
+OIDC provenance, then a GitHub Release. The script waits for staging and
+asks for a 2FA code to approve publication; approval is also available on
+npmjs.com.
+
+Configure npm's GitHub Actions trusted publisher for `xl0/pi-lovely-config`,
+workflow `publish.yml`, environment `npm`. The GitHub job uses that environment.
+No npm token is needed in CI.
+
 ## Related projects
 
 |  |  |

@@ -12,7 +12,7 @@
 ## Public API
 
 - `defineScopedConfig()` declares a flat keyed schema, returns a stateful config object.
-- `field.enum/boolean/string/text/number()` create fields.
+- `field.enum/multiEnum/boolean/string/text/number()` create fields.
 - `config.load(cwd)` fills `config.value`, `config.scoped`, `config.warnings`.
 - `config.update(scope, key, value)` writes one known key, reloads.
 - `config.resetScope(scope)` deletes that scope's file, reloads.
@@ -78,6 +78,20 @@ Scope order is not configurable. Missing files read as empty patches.
 
 - `bun run typecheck`, `bun run biome:check`, `bun run check` (both).
 - Published as a library module, not a Pi extension package;
-  ships `src/`, `README.md`, `LICENSE`.
+  ships `src/`, `README.md`, `CHANGELOG.md`, `LICENSE`.
 - No runtime deps; Pi packages (`@earendil-works/pi-coding-agent`,
   `@earendil-works/pi-tui`) are peers and dev deps.
+
+## Releases
+
+- `CHANGELOG.md` holds human-written `[Unreleased]` entries.
+- `bun run release [patch|minor|major|x.y.z] [--no-push]` runs
+  `scripts/release.ts`, matching the codex/web staged-release flow.
+  It checks origin, npm, release-file cleanliness, and package checks before
+  writing the version/changelog. Confirmation commits only those two files,
+  tags, and pushes; unrelated staged files stay out of the release commit.
+- `.github/workflows/publish.yml` handles stable `v*` tags: verifies version,
+  checks, stages on npm with OIDC provenance, then creates a GitHub Release
+  from the changelog. Environment: `npm`; no CI npm token.
+- Publication requires manual 2FA approval, prompted by the script after
+  staging or performed on npmjs.com. `--no-push` stops at the local tag.

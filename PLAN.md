@@ -13,5 +13,7 @@ and only what the schema knows is ever written back.
 - [x] Core library: keyed schema, field builders, scoped resolution,
       key-level `update()`, unknown-key preservation, invalid-value warnings.
 - [x] TUI editor: scope tabs, cycling, reset, `visibleWhen`, scope notes,
-      searchable enums, multiline text fields.
+      searchable enums and multi-enum checklists, multiline text fields.
 - [x] Demo extension and README covering the keyed schema API.
+- [x] CI-driven staged npm releases, changelog, and local release script
+      matching codex/web; publication remains gated on manual 2FA approval.
