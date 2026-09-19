@@ -35,8 +35,13 @@ Field metadata: `description`, `valueDescriptions`, `depth`, `visibleWhen`.
   multiline in the TUI.
 - Enum fields opt into fuzzy search with `search: true`.
 - MultiEnum fields hold a string array; each scope replaces the whole array.
+- Enum/multiEnum `choices` default to `"strict"`. `"advisory"` retains
+  unavailable strings and widens resolved types to `string` / `readonly string[]`.
+  Choice lists stay nonempty and defaults must be listed, even in advisory mode.
+  Builder return modes use `NoInfer` to keep inline schemas from accidentally
+  widening strict enum types through contextual inference.
 - Number fields use either range mode (`min`/`max`/`step`) or explicit
-  `values`, never both.
+  `values`, never both; their constraints remain strict.
 
 ## Scopes
 
@@ -56,6 +61,10 @@ Scope order is not configurable. Missing files read as empty patches.
 - Unknown keys are preserved across key updates, ignored on resolution.
 - Invalid known values become warnings and are skipped while resolving;
   `update()` refuses them, but hand-edited files keep them.
+- Advisory choice mismatches are accepted by resolution and `update()`;
+  wrong types (including non-string array items) remain invalid.
+  Warnings carry `action: "retained" | "ignored"`; scope precedence still applies.
+  Choice warnings show up to three complete unavailable values, not the catalog.
 - Newlines in string field defaults or values are invalid - use text fields.
 - Files left empty are deleted.
 
@@ -69,6 +78,9 @@ Scope order is not configurable. Missing files read as empty patches.
   pending set: Space toggles, Enter commits, Esc discards. Checked items
   float to the top; cursor follows the toggled item. Lists wrap, never
   truncated. Text editor also renders inline; Shift+Enter inserts newlines.
+- Advisory pickers snapshot listed + saved unavailable choices. Unavailable
+  items are marked and stay in the picker after unchecking so they can be
+  rechecked before saving. Scope notes include retained values.
 - Esc exits edit mode and discards uncommitted input.
 - Scope notes show compact default/user/workspace source values.
 - `visibleWhen` is UI-only: hidden saved values persist until cleared.
@@ -76,7 +88,9 @@ Scope order is not configurable. Missing files read as empty patches.
 
 ## Tooling
 
-- `bun run typecheck`, `bun run biome:check`, `bun run check` (both).
+- `bun run typecheck`, `bun run biome:check`, `bun test`; `bun run check`
+  runs all three. `tests/advisory-choices.test.ts` covers typing, resolution,
+  writes, sampled warnings, and picker preservation/removal.
 - Published as a library module, not a Pi extension package;
   ships `src/`, `README.md`, `CHANGELOG.md`, `LICENSE`.
 - No runtime deps; Pi packages (`@earendil-works/pi-coding-agent`,

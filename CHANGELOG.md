@@ -4,6 +4,19 @@ Historical release dates use npm publication dates (UTC).
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in `choices: "advisory"` for enum and multi-enum fields: unavailable
+  strings are retained with warnings and resolve to widened string types.
+- Warnings expose `action: "retained" | "ignored"` for caller-controlled handling.
+
+### Fixed
+
+- Choice warnings name a bounded sample of unavailable values instead of
+  listing the entire allowed catalog.
+- Advisory pickers show unavailable saved choices and preserve them through
+  edits unless explicitly removed.
+
 ## [0.1.3] - 2026-09-06
 
 ### Added
