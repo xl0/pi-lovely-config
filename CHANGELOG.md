@@ -4,6 +4,8 @@ Historical release dates use npm publication dates (UTC).
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-09-19
+
 ### Added
 
 - Add `choices: "advisory"` for enum and multi-enum fields to retain unavailable strings with warnings and widened string types.
