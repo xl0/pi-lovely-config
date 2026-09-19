@@ -24,7 +24,7 @@ function editor<Config extends object>(config: ScopedConfig<Config>) {
 		config,
 		tui: { requestRender() {} } as TUI,
 		theme: {
-			fg: (_color: string, text: string) => text,
+			fg: (color: string, text: string) => (color === "warning" ? `\x1b[33m${text}\x1b[39m` : text),
 			bg: (_color: string, text: string) => text,
 			bold: (text: string) => text
 		} as Theme,
@@ -175,14 +175,15 @@ test("multi-enum picker preserves, searches, removes, and rechecks unavailable c
 	)
 	const ui = editor(config)
 	ui.handleInput("\r")
-	expect(ui.render(100).join("\n")).toContain("removed (unavailable)")
+	expect(ui.render(100).join("\n")).toContain("\x1b[33m✗ \x1b[39m\x1b[33mremoved\x1b[39m")
 	ui.handleInput("\r")
 	expect(config.value.models).toEqual(["known", "removed"])
 
 	ui.handleInput("\r")
 	ui.handleInput("removed")
 	ui.handleInput(" ")
-	expect(ui.render(100).join("\n")).toContain("removed (unavailable)")
+	expect(ui.render(100).join("\n")).toContain("\x1b[33mremoved\x1b[39m")
+	expect(ui.render(100).join("\n")).not.toContain("✗ ")
 	ui.handleInput(" ")
 	ui.handleInput("\r")
 	expect(config.value.models).toEqual(["known", "removed"])
@@ -212,7 +213,7 @@ test("single-enum picker keeps an unavailable selection; scope notes show retain
 	)
 	const ui = editor(config)
 	ui.handleInput("\r")
-	expect(ui.render(100).join("\n")).toContain("> removed (unavailable)")
+	expect(ui.render(100).join("\n")).toContain("> \x1b[33m✗ \x1b[39m\x1b[33mremoved\x1b[39m")
 	ui.handleInput("\r")
 	expect(config.value.model).toBe("removed")
 

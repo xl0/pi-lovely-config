@@ -199,7 +199,8 @@ default/user/workspace source notes. Left/right moves focus, Enter edits or
 cycles values, Space toggles include, Esc discards uncommitted input.
 
 Editor writes via `update()` / `resetScope()`, then reloads merged config.
-Advisory pickers include saved unavailable choices, marked `(unavailable)`.
+Advisory pickers show unavailable choices in the warning color, using `✗`
+instead of `✓` for selected unavailable items.
 Multi-enum selections remain checked until explicitly removed; filtering or
 saving other selections does not drop them. Esc discards pending changes.
 

@@ -79,7 +79,9 @@ Scope order is not configurable. Missing files read as empty patches.
   float to the top; cursor follows the toggled item. Lists wrap, never
   truncated. Text editor also renders inline; Shift+Enter inserts newlines.
 - Advisory pickers snapshot listed + saved unavailable choices. Unavailable
-  items are marked and stay in the picker after unchecking so they can be
+  items use warning-colored text, including when highlighted, and selected
+  unavailable items use `✗` in place of the `✓` selection marker.
+  They stay in the picker after unchecking so they can be
   rechecked before saving. Scope notes include retained values.
 - Esc exits edit mode and discards uncommitted input.
 - Scope notes show compact default/user/workspace source values.

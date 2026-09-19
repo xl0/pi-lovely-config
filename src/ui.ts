@@ -268,13 +268,19 @@ export class ScopedConfigEditor<Config extends object> {
 		for (let index = startIndex; index < endIndex; index++) {
 			const value = values[index] ?? ""
 			const selected = index === state.selectedIndex
-			const marker = state.pending ? (state.pending.has(value) ? this.theme.fg("accent", "✓ ") : "  ") : ""
+			const unavailable = !field.values.includes(value)
+			const marker = state.pending
+				? state.pending.has(value)
+					? this.theme.fg(unavailable ? "warning" : "accent", unavailable ? "✗ " : "✓ ")
+					: "  "
+				: unavailable
+					? this.theme.fg("warning", "✗ ")
+					: ""
 			const prefix = `${indent}${this.theme.fg(selected ? "accent" : "muted", selected ? "> " : "  ")}${marker}`
 			const description = field.valueDescriptions?.[value]
-			const renderedValue = this.theme.fg(selected ? "accent" : "text", value)
+			const renderedValue = this.theme.fg(unavailable ? "warning" : selected ? "accent" : "text", value)
 			const renderedDescription = description ? ` ${this.theme.fg("muted", description)}` : ""
-			const unavailable = field.values.includes(value) ? "" : this.theme.fg("warning", " (unavailable)")
-			addWrappedWithPrefix(lines, width, prefix, `${renderedValue}${unavailable}${renderedDescription}`)
+			addWrappedWithPrefix(lines, width, prefix, `${renderedValue}${renderedDescription}`)
 		}
 
 		if (startIndex > 0 || endIndex < values.length) {

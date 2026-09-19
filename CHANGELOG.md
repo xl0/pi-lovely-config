@@ -6,16 +6,13 @@ Historical release dates use npm publication dates (UTC).
 
 ### Added
 
-- Opt-in `choices: "advisory"` for enum and multi-enum fields: unavailable
-  strings are retained with warnings and resolve to widened string types.
-- Warnings expose `action: "retained" | "ignored"` for caller-controlled handling.
+- Add `choices: "advisory"` for enum and multi-enum fields to retain unavailable strings with warnings and widened string types.
+- Expose `action: "retained" | "ignored"` on warnings for caller-controlled handling.
 
 ### Fixed
 
-- Choice warnings name a bounded sample of unavailable values instead of
-  listing the entire allowed catalog.
-- Advisory pickers show unavailable saved choices and preserve them through
-  edits unless explicitly removed.
+- Limit choice warnings to three complete unavailable values and a remaining count.
+- Mark selected unavailable choices with ✗ and warning-colored text in advisory pickers, preserving selections until explicitly removed.
 
 ## [0.1.3] - 2026-09-06
 
