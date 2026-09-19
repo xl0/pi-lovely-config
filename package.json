@@ -35,8 +35,9 @@
 		".": "./src/index.ts"
 	},
 	"scripts": {
+		"test": "bun test",
 		"typecheck": "tsgo --noEmit",
-		"check": "bun run typecheck && bun run biome:check",
+		"check": "bun run typecheck && bun run biome:check && bun run test",
 		"prepublishOnly": "bun run check",
 		"release": "bun run scripts/release.ts",
 		"lint": "biome lint .",

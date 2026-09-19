@@ -40,12 +40,14 @@ export default function (pi: ExtensionAPI) {
 				model: field.enum(modelValues, defaultModel, {
 					label: "Model",
 					description: "Searchable enum populated from Pi's available models",
+					choices: "advisory",
 					search: true,
 					valueDescriptions: modelDescriptions
 				}),
 				models: field.multiEnum(modelValues, [defaultModel], {
 					label: "Models",
 					description: "Multi-select enum. Enter opens searchable picker; Space toggles items, Enter saves",
+					choices: "advisory",
 					valueDescriptions: modelDescriptions
 				}),
 				compactMode: field.boolean(false, {

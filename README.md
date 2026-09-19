@@ -55,7 +55,8 @@ lets newer config files survive older app versions.
 
 Invalid known values, invalid JSON, and non-object config files are warnings and
 are ignored while resolving. Writing a key replaces a malformed file with valid
-config.
+config. Enum fields can opt into advisory choices to retain unavailable values
+instead of falling back.
 
 ## Schema
 
@@ -90,6 +91,31 @@ single-line. Text fields resolve to string values and use a multi-line TUI
 editor. Number fields take either range mode (`min`/`max`/`step`) or an
 explicit `values` list, never both.
 
+### Strict and advisory choices
+
+Enums and multi-enums default to `choices: "strict"`: unlisted values invalidate
+the whole field, which falls back to a lower scope or its default. `update()`
+rejects them. Strict enums retain their inferred literal-union types.
+
+For changing catalogs such as available models, opt into advisory choices:
+
+```ts
+models: field.multiEnum(["provider/model-a", "provider/model-b"], [], {
+	choices: "advisory"
+})
+```
+
+`choices: "advisory"` works on both `field.enum()` and `field.multiEnum()`.
+Loading, resolving, and updating retain unlisted strings; multi-enums keep the
+whole list rather than filtering it. Load/update report retained-value warnings
+in `config.warnings`. The caller decides how to handle unavailable choices.
+Resolved types widen to `string` / `readonly string[]`.
+
+Wrong types are still invalid, including any non-string multi-enum item.
+Choice lists must still be nonempty, and schema defaults must be listed choices.
+Numeric bounds and numeric `values` remain strict: invalid numbers fall back
+during resolution and are rejected by `update()`, never clamped.
+
 UI-only metadata:
 
 - `label` — display name; defaults to the key
@@ -111,7 +137,19 @@ config.load(ctx.cwd)
 
 - `value` — defaults-filled merged config
 - `scoped` — raw user/workspace patches, including unknown keys
-- `warnings` — invalid field or malformed file warnings by scope/path; field warnings include `key`
+- `warnings` — field or malformed file warnings by scope/path; field warnings
+  include `key`. Each has a `message` and `action: "retained" | "ignored"`.
+  Retained means accepted for resolution, not necessarily the winning scope.
+  Choice warnings show at most three unavailable values, not the allowed catalog.
+
+For example, callers can display retained warnings less prominently:
+
+```ts
+for (const warning of config.warnings) {
+	ctx.ui.notify(`${warning.path}: ${warning.message}`,
+		warning.action === "retained" ? "info" : "warning")
+}
+```
 
 Update one key:
 
@@ -161,6 +199,9 @@ default/user/workspace source notes. Left/right moves focus, Enter edits or
 cycles values, Space toggles include, Esc discards uncommitted input.
 
 Editor writes via `update()` / `resetScope()`, then reloads merged config.
+Advisory pickers include saved unavailable choices, marked `(unavailable)`.
+Multi-enum selections remain checked until explicitly removed; filtering or
+saving other selections does not drop them. Esc discards pending changes.
 
 ## Releasing
 

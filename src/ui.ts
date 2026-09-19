@@ -13,7 +13,7 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi
 } from "@earendil-works/pi-tui"
-import type { ConfigPatch, ConfigScope, ScopedConfig, ScopedConfigField, ScopedConfigPatch } from "./config"
+import type { ConfigPatch, ConfigScope, ConfigWarning, ScopedConfig, ScopedConfigField, ScopedConfigPatch } from "./config"
 import { getConfigWarnings } from "./config"
 
 type Keybindings = ReturnType<typeof getKeybindings>
@@ -23,7 +23,14 @@ type FocusPart = "include" | "value"
 type NumberInputParseResult = { ok: true; value: number } | { ok: false; message: string }
 type EnumField = Extract<ScopedConfigField, { kind: "enum" | "multiEnum" }>
 // pending holds the uncommitted multiEnum selection; absent for single enums
-type EnumSearchState = { input: Input; fieldKey: string; selectedIndex: number; pending: Set<string> | undefined }
+type EnumSearchState = {
+	input: Input
+	fieldKey: string
+	selectedIndex: number
+	pending: Set<string> | undefined
+	// Snapshot includes unavailable saved choices, so unchecked items remain available to recheck.
+	values: readonly string[]
+}
 type TextEditorState = { editor: Editor; fieldKey: string }
 
 export class ScopedConfigEditor<Config extends object> {
@@ -249,7 +256,7 @@ export class ScopedConfigEditor<Config extends object> {
 		const state = this.activeEnumSearch
 		if (!state || !isEnumField(field) || field.key !== state.fieldKey) return
 
-		const values = enumSearchValues(field, state.input.getValue(), state.pending)
+		const values = enumSearchValues(field, state)
 		if (values.length === 0) {
 			addWrappedWithPrefix(lines, width, indent, this.theme.fg("muted", "No matching values"))
 			return
@@ -266,7 +273,8 @@ export class ScopedConfigEditor<Config extends object> {
 			const description = field.valueDescriptions?.[value]
 			const renderedValue = this.theme.fg(selected ? "accent" : "text", value)
 			const renderedDescription = description ? ` ${this.theme.fg("muted", description)}` : ""
-			addWrappedWithPrefix(lines, width, prefix, `${renderedValue}${renderedDescription}`)
+			const unavailable = field.values.includes(value) ? "" : this.theme.fg("warning", " (unavailable)")
+			addWrappedWithPrefix(lines, width, prefix, `${renderedValue}${unavailable}${renderedDescription}`)
 		}
 
 		if (startIndex > 0 || endIndex < values.length) {
@@ -434,11 +442,20 @@ export class ScopedConfigEditor<Config extends object> {
 		const input = new Input()
 		input.focused = true
 		const value = getConfigValue(this.scoped[this.currentScope()], field.key)
-		const selectedIndex = typeof value === "string" ? Math.max(0, field.values.indexOf(value)) : 0
-		const pending = field.kind === "multiEnum" ? new Set(Array.isArray(value) ? (value as string[]) : []) : undefined
+		const saved =
+			field.kind === "multiEnum"
+				? Array.isArray(value)
+					? value.filter((item): item is string => typeof item === "string")
+					: []
+				: typeof value === "string"
+					? [value]
+					: []
+		const values = [...new Set([...field.values, ...(field.choices === "advisory" ? saved : [])])]
+		const selectedIndex = typeof value === "string" ? Math.max(0, values.indexOf(value)) : 0
+		const pending = field.kind === "multiEnum" ? new Set(saved) : undefined
 		this.activeInput = undefined
 		this.activeInputError = undefined
-		this.activeEnumSearch = { input, fieldKey: field.key, selectedIndex, pending }
+		this.activeEnumSearch = { input, fieldKey: field.key, selectedIndex, pending, values }
 		this.tui.requestRender()
 	}
 
@@ -486,14 +503,13 @@ export class ScopedConfigEditor<Config extends object> {
 		if (!state || !isEnumField(field) || field.key !== state.fieldKey) return false
 
 		const pending = state.pending
-		const query = state.input.getValue()
-		const highlighted = enumSearchValues(field, query, pending)[state.selectedIndex]
+		const highlighted = enumSearchValues(field, state)[state.selectedIndex]
 		if (kb.matches(data, "tui.input.submit")) {
 			if (pending) {
 				this.saveValue(
 					this.currentScope(),
 					field,
-					field.values.filter(value => pending.has(value))
+					state.values.filter(value => pending.has(value))
 				)
 			} else if (highlighted !== undefined) {
 				this.activeEnumSearch = undefined
@@ -506,7 +522,7 @@ export class ScopedConfigEditor<Config extends object> {
 				if (pending.has(highlighted)) pending.delete(highlighted)
 				else pending.add(highlighted)
 				// list reorders on toggle; keep the cursor on the same item
-				state.selectedIndex = enumSearchValues(field, query, pending).indexOf(highlighted)
+				state.selectedIndex = enumSearchValues(field, state).indexOf(highlighted)
 			}
 			this.tui.requestRender()
 			return true
@@ -523,7 +539,7 @@ export class ScopedConfigEditor<Config extends object> {
 		const state = this.activeEnumSearch
 		const field = this.selectedField()
 		if (!state || !isEnumField(field) || field.key !== state.fieldKey) return
-		const values = enumSearchValues(field, state.input.getValue(), state.pending)
+		const values = enumSearchValues(field, state)
 		if (values.length === 0) return
 		state.selectedIndex = (state.selectedIndex + delta + values.length) % values.length
 		this.tui.requestRender()
@@ -698,9 +714,11 @@ function nextOption<T>(options: readonly T[], value: T): T {
 	return options[(index + 1) % options.length] ?? options[0] ?? value
 }
 
-// Checked items (pending) float to the top, keeping relative order.
-function enumSearchValues(field: EnumField, query: string, pending?: Set<string>): string[] {
-	const values = field.values.map(value => ({ value }))
+// Checked items float to the top, keeping relative order.
+function enumSearchValues(field: EnumField, state: EnumSearchState): string[] {
+	const { pending } = state
+	const query = state.input.getValue()
+	const values = state.values.map(value => ({ value }))
 	const matched = query
 		? fuzzyFilter(values, query, item => `${item.value} ${field.valueDescriptions?.[item.value] ?? ""}`).map(item => item.value)
 		: values.map(item => item.value)
@@ -717,8 +735,8 @@ function getFieldWarning(config: object, field: ScopedConfigField): string | und
 	return getConfigWarnings([field], config)[0]?.message
 }
 
-function getFieldValueWarning(field: ScopedConfigField, value: unknown): string | undefined {
-	return getConfigWarnings([field], { [field.key]: value })[0]?.message
+function getFieldValueWarning(field: ScopedConfigField, value: unknown): ConfigWarning | undefined {
+	return getConfigWarnings([field], { [field.key]: value })[0]
 }
 
 function getValueDescription(config: object, field: ScopedConfigField): string | undefined {
@@ -766,13 +784,16 @@ function getScopeNote(
 	const value = getConfigValue(configs[scope], field.key)
 	const userValue = getConfigValue(configs.user, field.key)
 	const workspaceValue = getConfigValue(configs.workspace, field.key)
-	const user = userValue === undefined || getFieldValueWarning(field, userValue) ? undefined : formatFieldValue(field, userValue)
+	const user =
+		userValue === undefined || getFieldValueWarning(field, userValue)?.action === "ignored" ? undefined : formatFieldValue(field, userValue)
 	const workspace =
-		workspaceValue === undefined || getFieldValueWarning(field, workspaceValue) ? undefined : formatFieldValue(field, workspaceValue)
+		workspaceValue === undefined || getFieldValueWarning(field, workspaceValue)?.action === "ignored"
+			? undefined
+			: formatFieldValue(field, workspaceValue)
 	const defaultValue = formatFieldValue(field, field.default)
 
 	if (value !== undefined) {
-		if (getFieldValueWarning(field, value)) return undefined
+		if (getFieldValueWarning(field, value)?.action === "ignored") return undefined
 		return scope === "user" && scopes.includes("workspace") && workspace !== undefined ? `Workspace: ${workspace}` : undefined
 	}
 

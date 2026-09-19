@@ -6,11 +6,13 @@ export type ConfigScope = "user" | "workspace"
 export type ConfigPatch = Record<string, unknown>
 export type ScopedConfigPatch = Record<ConfigScope, ConfigPatch>
 export type ResolvedConfig<Config extends object> = { [Key in keyof Config]-?: NonNullable<Config[Key]> }
-export type ConfigWarning = { key?: string; message: string }
+/** Whether the warned-about field/file participates in resolution (scope precedence still applies). */
+export type ConfigWarning = { key?: string; message: string; action: "retained" | "ignored" }
 export type ScopedConfigWarning = ConfigWarning & { scope: ConfigScope; path: string }
 
 type StringValues = readonly [string, ...string[]]
 type NumberValues = readonly [number, ...number[]]
+type ChoiceMode = "strict" | "advisory"
 
 export type VisibilityContext = {
 	get(key: string): unknown
@@ -29,17 +31,21 @@ type BaseField = FieldMeta & {
 	kind: "enum" | "multiEnum" | "boolean" | "string" | "text" | "number"
 }
 
-export type EnumConfigField<Values extends StringValues = StringValues> = BaseField & {
+export type EnumConfigField<Values extends StringValues = StringValues, Choices extends ChoiceMode = ChoiceMode> = BaseField & {
 	kind: "enum"
 	values: Values
+	/** Advisory choices retain unknown strings with a warning. Defaults must still be listed. */
+	choices?: Choices
 	valueDescriptions?: Partial<Record<Values[number], string>> & Record<string, string>
 	search?: boolean
 	default: Values[number]
 }
 
-export type MultiEnumConfigField<Values extends StringValues = StringValues> = BaseField & {
+export type MultiEnumConfigField<Values extends StringValues = StringValues, Choices extends ChoiceMode = ChoiceMode> = BaseField & {
 	kind: "multiEnum"
 	values: Values
+	/** Advisory choices retain unknown strings with a warning. Defaults must still be listed. */
+	choices?: Choices
 	valueDescriptions?: Partial<Record<Values[number], string>> & Record<string, string>
 	default: readonly Values[number][]
 }
@@ -96,10 +102,13 @@ export type ConfigFromSchema<Schema extends ConfigSchema> = {
 	[Key in keyof Schema]: FieldValue<Schema[Key]>
 }
 
+// Widen whenever the field may be advisory, including a non-literal choices option.
+type EnumValue<Field, Value> = "choices" extends keyof Field ? ("advisory" extends Field["choices"] ? string : Value) : Value
+
 type FieldValue<Field> = Field extends { kind: "enum"; values: infer Values extends readonly string[] }
-	? Values[number]
+	? EnumValue<Field, Values[number]>
 	: Field extends { kind: "multiEnum"; values: infer Values extends readonly string[] }
-		? readonly Values[number][]
+		? readonly EnumValue<Field, Values[number]>[]
 		: Field extends { kind: "boolean" }
 			? boolean
 			: Field extends { kind: "string" | "text" }
@@ -126,41 +135,62 @@ export type ScopedConfig<Config extends object> = {
 	resetScope(scope: ConfigScope): ScopedConfig<Config>
 }
 
-type EnumFieldOptions<Values extends StringValues> = Omit<EnumConfigField<Values>, "kind" | "values" | "default">
-type MultiEnumFieldOptions<Values extends StringValues> = Omit<MultiEnumConfigField<Values>, "kind" | "values" | "default">
+type EnumFieldOptions<Values extends StringValues, Choices extends ChoiceMode> = Omit<
+	EnumConfigField<Values, Choices>,
+	"kind" | "values" | "default"
+>
+type MultiEnumFieldOptions<Values extends StringValues, Choices extends ChoiceMode> = Omit<
+	MultiEnumConfigField<Values, Choices>,
+	"kind" | "values" | "default"
+>
 type BooleanFieldOptions = Omit<BooleanConfigField, "kind" | "default">
 type StringFieldOptions = Omit<StringConfigField, "kind" | "default">
 type TextFieldOptions = Omit<TextConfigField, "kind" | "default">
 type RangedNumberOptions = Omit<RangedNumberConfigField, "kind" | "default">
 type ValuedNumberOptions<Values extends NumberValues> = Omit<ValuedNumberConfigField<Values>, "kind" | "default">
 
-function enumField<const Values extends StringValues>(
+// NoInfer on the return mode keeps contextual schema typing from widening the strict default.
+function enumField<const Values extends StringValues, Choices extends ChoiceMode = "strict">(
 	values: Values,
 	defaultValue: Values[number],
-	options: EnumFieldOptions<Values> = {}
-): EnumConfigField<Values> {
+	options: EnumFieldOptions<Values, Choices> = {}
+): EnumConfigField<Values, NoInfer<Choices>> {
 	if (values.length === 0) throw new Error("Enum field must have at least one value")
-	if (!values.includes(defaultValue)) throw new Error(`Enum field default must be one of: ${values.join(", ")}`)
+	const warning = getChoiceWarning(values, [defaultValue])
+	if (warning) throw new Error(`Enum field default: ${warning}`)
 	return { kind: "enum", values, default: defaultValue, ...options }
 }
 
-function multiEnumField<const Values extends StringValues>(
+function multiEnumField<const Values extends StringValues, Choices extends ChoiceMode = "strict">(
 	values: Values,
 	defaultValue: readonly Values[number][],
-	options: MultiEnumFieldOptions<Values> = {}
-): MultiEnumConfigField<Values> {
+	options: MultiEnumFieldOptions<Values, Choices> = {}
+): MultiEnumConfigField<Values, NoInfer<Choices>> {
 	if (values.length === 0) throw new Error("Multi-enum field must have at least one value")
-	const warning = getMultiEnumWarning(values, defaultValue)
-	if (warning) throw new Error(`Multi-enum field default ${warning}`)
+	if (!isStringArray(defaultValue)) {
+		throw new Error("Multi-enum field default must be an array of strings")
+	}
+	const warning = getChoiceWarning(values, defaultValue)
+	if (warning) throw new Error(`Multi-enum field default: ${warning}`)
 	return { kind: "multiEnum", values, default: defaultValue, ...options }
 }
 
-function getMultiEnumWarning(values: readonly string[], value: unknown): string | undefined {
-	if (!Array.isArray(value)) return "must be array"
-	for (const item of value) {
-		if (typeof item !== "string" || !values.includes(item)) return `items should be one of: ${values.join(", ")}`
-	}
-	return undefined
+function isStringArray(value: unknown): value is string[] {
+	if (!Array.isArray(value)) return false
+	// Iterate holes too: they serialize as null, not strings.
+	for (const item of value) if (typeof item !== "string") return false
+	return true
+}
+
+function getChoiceWarning(values: readonly (string | number)[], selected: readonly (string | number)[]): string | undefined {
+	const available = new Set(values)
+	const unavailable = [...new Set(selected)].filter(value => !available.has(value))
+	if (unavailable.length === 0) return undefined
+	const examples = unavailable
+		.slice(0, 3)
+		.map(value => JSON.stringify(value))
+		.join(", ")
+	return `unavailable choice${unavailable.length === 1 ? "" : "s"}: ${examples}${unavailable.length > 3 ? ` (+${unavailable.length - 3} more)` : ""}`
 }
 
 function booleanField(defaultValue: boolean, options: BooleanFieldOptions = {}): BooleanConfigField {
@@ -195,7 +225,8 @@ function numberField(defaultValue: number, options: RangedNumberOptions | Valued
 		for (const value of options.values) {
 			if (!Number.isFinite(value)) throw new Error("Number field values must be finite")
 		}
-		if (!options.values.includes(defaultValue)) throw new Error(`Number field default must be one of: ${options.values.join(", ")}`)
+		const warning = getChoiceWarning(options.values, [defaultValue])
+		if (warning) throw new Error(`Number field default: ${warning}`)
 	} else {
 		if (options.min !== undefined && !Number.isFinite(options.min)) throw new Error("Number field min must be finite")
 		if (options.max !== undefined && !Number.isFinite(options.max)) throw new Error("Number field max must be finite")
@@ -267,7 +298,7 @@ class ScopedConfigImpl<Config extends object> implements ScopedConfig<Config> {
 		for (const scope of this.scopes) {
 			for (const field of this.fields) {
 				const value = scoped[scope][field.key]
-				if (value !== undefined && !getConfigValueWarning(field, value)) resolved[field.key] = value
+				if (value !== undefined && getConfigValueWarning(field, value)?.action !== "ignored") resolved[field.key] = value
 			}
 		}
 		return resolved as ResolvedConfig<Config>
@@ -280,7 +311,7 @@ class ScopedConfigImpl<Config extends object> implements ScopedConfig<Config> {
 			const path = this.path(scope, cwd)
 			const result = readConfigFile(path)
 			scoped[scope] = result.config
-			if (result.warning) warnings.push({ message: result.warning, scope, path })
+			if (result.warning) warnings.push({ message: result.warning, action: "ignored", scope, path })
 		}
 		this.cwd = cwd
 		this.scoped = scoped
@@ -300,7 +331,7 @@ class ScopedConfigImpl<Config extends object> implements ScopedConfig<Config> {
 		if (!field) throw new Error(`Unknown config key: ${key}`)
 		if (value !== undefined) {
 			const warning = getConfigValueWarning(field, value)
-			if (warning) throw new Error(warning)
+			if (warning?.action === "ignored") throw new Error(warning.message)
 		}
 
 		const cwd = this.currentCwd()
@@ -364,36 +395,47 @@ export function getConfigWarnings(fields: readonly ScopedConfigField[], config: 
 	for (const field of fields) {
 		const value = (config as Record<string, unknown>)[field.key]
 		if (value === undefined) continue
-		const message = getConfigValueWarning(field, value)
-		if (message) warnings.push({ key: field.key, message: `${message}; value is ignored while resolving` })
+		const warning = getConfigValueWarning(field, value)
+		if (warning) warnings.push({ ...warning, message: `${warning.message}; value is ${warning.action} while resolving` })
 	}
 	return warnings
 }
 
-function getConfigValueWarning(field: ScopedConfigField, value: unknown): string | undefined {
+function getConfigValueWarning(field: ScopedConfigField, value: unknown): ConfigWarning | undefined {
+	let message: string | undefined
+	let action: ConfigWarning["action"] = "ignored"
 	switch (field.kind) {
 		case "enum":
-			if (typeof value !== "string") return `/${field.key} must be string`
-			if (!field.values.includes(value)) return `/${field.key} should be one of: ${field.values.join(", ")}`
-			return undefined
+			if (typeof value !== "string") message = "must be string"
+			else {
+				message = getChoiceWarning(field.values, [value])
+				if (field.choices === "advisory") action = "retained"
+			}
+			break
 		case "multiEnum": {
-			const warning = getMultiEnumWarning(field.values, value)
-			return warning ? `/${field.key} ${warning}` : undefined
+			if (!isStringArray(value)) message = "must be an array of strings"
+			else {
+				message = getChoiceWarning(field.values, value)
+				if (field.choices === "advisory") action = "retained"
+			}
+			break
 		}
 		case "boolean":
-			return typeof value === "boolean" ? undefined : `/${field.key} must be boolean`
+			if (typeof value !== "boolean") message = "must be boolean"
+			break
 		case "string":
-			if (typeof value !== "string") return `/${field.key} must be string`
-			return /[\r\n]/.test(value) ? `/${field.key} must be single-line string` : undefined
+			if (typeof value !== "string") message = "must be string"
+			else if (/[\r\n]/.test(value)) message = "must be single-line string"
+			break
 		case "text":
-			return typeof value === "string" ? undefined : `/${field.key} must be string`
+			if (typeof value !== "string") message = "must be string"
+			break
 		case "number":
-			if (typeof value !== "number" || !Number.isFinite(value)) return `/${field.key} must be number`
-			if (field.values !== undefined && !field.values.includes(value)) {
-				return `/${field.key} should be one of: ${field.values.join(", ")}`
-			}
-			if (field.min !== undefined && value < field.min) return `/${field.key} should be at least ${field.min}`
-			if (field.max !== undefined && value > field.max) return `/${field.key} should be at most ${field.max}`
-			return undefined
+			if (typeof value !== "number" || !Number.isFinite(value)) message = "must be a finite number"
+			else if (field.values !== undefined) message = getChoiceWarning(field.values, [value])
+			else if (field.min !== undefined && value < field.min) message = `should be at least ${field.min}`
+			else if (field.max !== undefined && value > field.max) message = `should be at most ${field.max}`
+			break
 	}
+	return message ? { key: field.key, message: `/${field.key} ${message}`, action } : undefined
 }
